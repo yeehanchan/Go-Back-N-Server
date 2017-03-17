@@ -1,18 +1,20 @@
 #include "gbn.h"
 
-void gbn_init(){
 
+void gbn_init(){
     s.state_type = CLOSED;
 }
 
-void set_gbn_state(int state){
-    s.state_type = state;
+void set_gbn_state(enum STATE type){
+    s.state_type = type;
 }
 
 int check_gbn_state(){
-
+    
     return s.state_type;
 }
+
+
 //check interity
 int checkPkt(int type, gbnhdr *pkt){
 
@@ -139,6 +141,7 @@ int parse_pkt(uint8_t type, char *buff, gbnhdr* pkt){
 
 
 
+
 uint16_t checksum(uint16_t *buf, int nwords)
 {
 	uint32_t sum;
@@ -161,6 +164,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	 *       up into multiple packets - you don't have to worry
 	 *       about getting more than N * DATALEN.
 	 */
+
 
 
 
@@ -192,16 +196,18 @@ int gbn_close(int sockfd){
 int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
+    gbn_init();
+    
     ssize_t senlen, revlen;
     char syn_buf[BUFF_SIZE], rev_buf[BUFF_SIZE];
     gbnhdr syn_packet, syn_ack_pkt;
 
 
 
-    gbn_init();
 
     // make a syn pkt
     if(make_pkt(SYN, &syn_packet) == -1){
+
         close(sockfd);
         return(-1);
     }
@@ -214,8 +220,6 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
         return(-1);
     }
     set_gbn_state(SYN_SENT);
-
-
 
     /* TODO: SET TIMER here. */
 
@@ -235,7 +239,6 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
     // received a synack
     if(syn_ack_pkt.type == (uint8_t*)SYNACK){
-
         set_gbn_state(ESTABLISHED);
         fprintf(stdout,"connection established\n");
         return EXIT_SUCCESS;
@@ -250,6 +253,7 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
     return(-1);
+
 }
 
 // need to be modified later
@@ -320,8 +324,7 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
         return(-1);
     }
 
-    set_gbn_state(SYN_RCVD);
-
+    set_gbn_state(SYN_RCVD);   
     parse_pkt(1, rev_buf, &syn_pkt);
 
     if(syn_pkt.type == SYN && checkPkt(1,&syn_pkt) == 0){

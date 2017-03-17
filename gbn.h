@@ -18,6 +18,7 @@
 #define WINDOW_SIZE   2
 #define BUFF_SIZE  1024
 
+
 /*----- Error variables -----*/
 extern int h_errno;
 extern int errno;
@@ -46,21 +47,9 @@ typedef struct {
     uint8_t data[DATALEN];    /* pointer to the payload                     */
 } __attribute__((packed)) gbnhdr;
 
-typedef struct state_t{
 
-	/* TODO: Your state information could be encoded here. */
-    uint8_t state_type;
 
-} state_t;
-
-typedef struct {
-
-    /* TODO: Your state information could be encoded here. */
-    uint8_t mode;
-
-} mode;
-
-enum {
+enum STATE{
 	CLOSED=0,
 	SYN_SENT,
 	SYN_RCVD,
@@ -69,20 +58,37 @@ enum {
 	FIN_RCVD
 };
 
-enum {
+enum MODE{
     SLOW=0,
     FAST
 };
 
 
-extern state_t s; //
+typedef struct state_t{
+    
+    /* TODO: Your state information could be encoded here. */
+    enum STATE state_type;
+    
+} state_t;
+
+typedef struct {
+    
+    /* TODO: Your state information could be encoded here. */
+    enum MODE mode_type;
+    
+} mode;
+
+state_t s;
 mode m; // client mode
 uint8_t base; // client side base - 1 is last acked packet
 uint8_t nextseq; //client side
 uint8_t last_acked; //server side
 uint8_t seq; //client side
 
+
 void gbn_init();
+void set_gbn_state(enum STATE state);
+int check_gbn_state();
 int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen);
 int gbn_listen(int sockfd, int backlog);
 int gbn_bind(int sockfd, const struct sockaddr *server, socklen_t socklen);
