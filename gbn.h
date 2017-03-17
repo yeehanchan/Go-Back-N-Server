@@ -67,23 +67,21 @@ enum MODE{
 typedef struct state_t{
     
     /* TODO: Your state information could be encoded here. */
+    struct sockaddr *client;
+    struct sockaddr *server;
+    socklen_t socklen;
     enum STATE state_type;
-    
+    uint8_t base; // client side base - 1 is last acked packet
+    uint8_t nextseq; //client side
+    uint8_t last_acked; //server side
+    uint8_t seq; //client side
+    enum MODE mode; // client mode
+
+
 } state_t;
 
-typedef struct {
-    
-    /* TODO: Your state information could be encoded here. */
-    enum MODE mode_type;
-    
-} mode;
-
 state_t s;
-mode m; // client mode
-uint8_t base; // client side base - 1 is last acked packet
-uint8_t nextseq; //client side
-uint8_t last_acked; //server side
-uint8_t seq; //client side
+
 
 
 void gbn_init();

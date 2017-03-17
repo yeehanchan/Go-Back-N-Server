@@ -3,16 +3,15 @@
 
 void gbn_init(){
     s.state_type = CLOSED;
+    s.socklen = sizeof(struct sockaddr);
+    s.base = 0;
+    s.nextseq = 0;
+    s.last_acked = -1;
+    s.seq = -1;
+    s.mode = 0;
 }
 
-void set_gbn_state(enum STATE type){
-    s.state_type = type;
-}
 
-int check_gbn_state(){
-    
-    return s.state_type;
-}
 
 
 //check interity
@@ -165,8 +164,26 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	 *       about getting more than N * DATALEN.
 	 */
 
+    if(s.state_type != ESTABLISHED){
+        return(-1);
+    }
+
+    char *token;
+    struct sockaddr *server = s.server;
+    socklen_t socklen = s.socklen;
+    struct gbnhdr* pkts[];
 
 
+    while(token = strsep(&buf,"\n") != NULL){
+        if(strlen(token) > DATALEN){
+            /*TODO: split */
+        }
+        else{
+            /*TODO: make pkt*/
+        }
+    }
+
+    /*TODO: sliding window*/
 
 	return EXIT_SUCCESS;
 }
@@ -206,12 +223,7 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
     // make a syn pkt
-    if(make_pkt(SYN, &syn_packet) == -1){
-
-        close(sockfd);
-        return(-1);
-    }
-
+    make_pkt(SYN, &syn_packet);
     sprintf(syn_buf,"%d\t%d\n",syn_packet.type,syn_packet.checksum);
 
     // send a syn pkt to server
@@ -219,7 +231,8 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
         close(sockfd);
         return(-1);
     }
-    set_gbn_state(SYN_SENT);
+    s.state_type = SYN_SENT;
+    s.server = server;
 
     /* TODO: SET TIMER here. */
 
@@ -238,13 +251,13 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
     // received a synack
-    if(syn_ack_pkt.type == (uint8_t*)SYNACK){
-        set_gbn_state(ESTABLISHED);
+    if(syn_ack_pkt.type == SYNACK && checkPkt(1, &syn_ack_pkt) == 0){
+        s.state_type = ESTABLISHED;
         fprintf(stdout,"connection established\n");
         return EXIT_SUCCESS;
     }
 
-    if(syn_ack_pkt.type == (uint8_t)RST){
+    if(syn_ack_pkt.type == RST){
         printf("connection rejected");
         return (-1);
     }
@@ -324,7 +337,9 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
         return(-1);
     }
 
-    set_gbn_state(SYN_RCVD);   
+    s.state_type = SYN_RCVD;
+    s.client = client;
+
     parse_pkt(1, rev_buf, &syn_pkt);
 
     if(syn_pkt.type == SYN && checkPkt(1,&syn_pkt) == 0){
