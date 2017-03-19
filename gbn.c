@@ -1,5 +1,19 @@
 #include "gbn.h"
 
+uint16_t checksum(uint16_t *buf, int nwords) {
+    uint32_t sum;
+
+    for (sum = 0; nwords > 0; nwords--) {
+        sum += *buf++;
+    }
+    sum = (sum >> 16) + (sum & 0xffff);
+    sum += (sum >> 16);
+
+    return ~sum;
+}
+
+
+
 
 void gbn_init(){
     s.state_type = CLOSED;
@@ -15,16 +29,16 @@ void gbn_init(){
 
 
 //check interity
-int checkPkt(int type, gbnhdr *pkt){
+int checkPkt(int type, char *buf, gbnhdr * pkt){
 
     uint16_t cs;
     if(type == 0){
-         cs = checksum((uint16_t *)pkt, 3);
+        //TODO: change value
+         cs = checksum((uint16_t *)buf, 2);
     }
     else{
-        cs = checksum((uint16_t *)pkt, 1);
+        cs = checksum((uint16_t *)buf, 1);
     }
-
     if(cs == pkt->checksum){
         return 0;
     }
@@ -35,53 +49,40 @@ int checkPkt(int type, gbnhdr *pkt){
 // make packet based on type
 int make_pkt(uint8_t type, gbnhdr * pkt){
 
+    char *buf;
     switch(type) {
         case SYN :
             pkt->type = SYN;
-            pkt->checksum = checksum((uint16_t *)pkt, 1);
+            sprintf(buf,"%d\t",pkt->type);
+            pkt->checksum = checksum((uint16_t*)buf,1);
+            fprintf(stderr,"client side checksum %d\n",pkt->checksum);
             return EXIT_SUCCESS;
 
         case SYNACK :
             pkt->type = SYNACK;
-            pkt->checksum = checksum((uint16_t *)pkt, 1);
-            return EXIT_SUCCESS;
-
-
-        case DATA :
-
-            pkt->type = DATA;
-            pkt->seqnum = seq++;
-            pkt->checksum = checksum((uint16_t *)pkt, 3);
-
-            return EXIT_SUCCESS;
-
-
-        case DATAACK :
-
-            pkt->type = DATAACK;
-            pkt->checksum = checksum((uint16_t *)pkt, 3);
-
+            sprintf(buf,"%d\t",pkt->type);
+            pkt->checksum = checksum((uint16_t*)buf,1);
             return EXIT_SUCCESS;
 
 
         case FIN :
 
             pkt->type = FIN;
-            pkt->checksum = checksum((uint16_t *)pkt, 1);
-
+            sprintf(buf,"%d\t",pkt->type);
+            pkt->checksum = checksum((uint16_t*)buf,1);
             return EXIT_SUCCESS;
 
         case FINACK :
 
             pkt->type = FINACK;
-            pkt->checksum = checksum((uint16_t *)pkt, 1);
-
-            break;
+            sprintf(buf,"%d\t",pkt->type);
+            pkt->checksum = checksum((uint16_t*)buf,1);
+            return EXIT_SUCCESS;
         case RST :
 
             pkt->type = RST;
-            pkt->checksum = checksum((uint16_t *)pkt, 1);
-
+            sprintf(buf,"%d\t",pkt->type);
+            pkt->checksum = checksum((uint16_t*)buf,1);
             return EXIT_SUCCESS;
     }
 
@@ -112,10 +113,6 @@ int parse_pkt(uint8_t type, char *buff, gbnhdr* pkt){
                     pkt->checksum = atoi(token);
                     break;
                 case 3:
-                    while((token = strsep(&buff, "\t") != NULL)){
-                        pkt->data[j] = atoi(token);
-                        j++;
-                    }
                     break;
             }
         }
@@ -135,21 +132,8 @@ int parse_pkt(uint8_t type, char *buff, gbnhdr* pkt){
             }
         }
     }
+
     return EXIT_SUCCESS;
-}
-
-
-
-
-uint16_t checksum(uint16_t *buf, int nwords)
-{
-	uint32_t sum;
-
-	for (sum = 0; nwords > 0; nwords--)
-		sum += *buf++;
-	sum = (sum >> 16) + (sum & 0xffff);
-	sum += (sum >> 16);
-	return ~sum;
 }
 
 
@@ -164,24 +148,49 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	 *       about getting more than N * DATALEN.
 	 */
 
-    if(s.state_type != ESTABLISHED){
-        return(-1);
-    }
+//    if(s.state_type != ESTABLISHED){
+//        return(-1);
+//    }
 
     char *token;
     struct sockaddr *server = s.server;
     socklen_t socklen = s.socklen;
-    struct gbnhdr* pkts[];
+    struct gbnhdr* pkts[N];
+    char * data[N];
+    int i;
 
 
-    while(token = strsep(&buf,"\n") != NULL){
-        if(strlen(token) > DATALEN){
-            /*TODO: split */
+    if(s.seq < N){
+        while((token = strsep(&buf,"\n")) != NULL){
+
+            char *p = token;
+            int len = strlen(token);
+
+            // split oversized packet
+            if(len > DATALEN){
+
+                while(len > 0){
+                    data[(int)s.seq] = malloc(sizeof(char)*DATALEN);
+                    strncpy(data[(int)s.seq],p,DATALEN);
+                    p = p + DATALEN;
+                    len -= DATALEN;
+                    s.seq++;
+
+                }
+
+            }
+            else{
+                strcpy(data[(int)s.seq],token);
+                s.seq++;
+            }
         }
-        else{
-            /*TODO: make pkt*/
-        }
+
+    }else{
+        fprintf(stderr,"buffer too long\n");
     }
+
+
+
 
     /*TODO: sliding window*/
 
@@ -214,9 +223,9 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
     gbn_init();
-    
+
     ssize_t senlen, revlen;
-    char syn_buf[BUFF_SIZE], rev_buf[BUFF_SIZE];
+    char syn_buf[BUFF_SIZE], rev_buf[BUFF_SIZE], copy[50];
     gbnhdr syn_packet, syn_ack_pkt;
 
 
@@ -225,7 +234,6 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
     // make a syn pkt
     make_pkt(SYN, &syn_packet);
     sprintf(syn_buf,"%d\t%d\n",syn_packet.type,syn_packet.checksum);
-
     // send a syn pkt to server
     if((senlen = sendto(sockfd, syn_buf, BUFF_SIZE, 0, server, socklen) == -1)){
         close(sockfd);
@@ -233,6 +241,8 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
     }
     s.state_type = SYN_SENT;
     s.server = server;
+    fprintf(stderr,"client sent  %s \n",syn_buf);
+
 
     /* TODO: SET TIMER here. */
 
@@ -246,22 +256,23 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
         close(sockfd);
         return(-1);
     }
+    strcpy(copy,rev_buf);
 
-    parse_pkt(1, rev_buf, &syn_ack_pkt);
+    parse_pkt(1, copy, &syn_ack_pkt);
 
+    fprintf(stderr,"client received  %s \n",rev_buf);
 
     // received a synack
-    if(syn_ack_pkt.type == SYNACK && checkPkt(1, &syn_ack_pkt) == 0){
+    if(syn_ack_pkt.type == SYNACK && checkPkt(1, rev_buf,&syn_ack_pkt) == 0){
         s.state_type = ESTABLISHED;
         fprintf(stdout,"connection established\n");
         return EXIT_SUCCESS;
     }
 
     if(syn_ack_pkt.type == RST){
-        printf("connection rejected");
+        printf("connection rejected\n");
         return (-1);
     }
-
 
 
 
@@ -324,10 +335,8 @@ int gbn_socket(int domain, int type, int protocol){
 int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
 
     ssize_t revlen, senlen;
-    gbnhdr syn_pkt;
-    gbnhdr rep_pkt;
-    char sen_buf[BUFF_SIZE];
-    char rev_buf[BUFF_SIZE];
+    gbnhdr syn_pkt, rep_pkt;
+    char sen_buf[BUFF_SIZE], rev_buf[BUFF_SIZE],cpy[BUFF_SIZE];
 
     printf("listener: waiting for revfrom\n");
 
@@ -336,13 +345,14 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
         close(sockfd);
         return(-1);
     }
+    strcpy(cpy,rev_buf);
 
     s.state_type = SYN_RCVD;
     s.client = client;
 
-    parse_pkt(1, rev_buf, &syn_pkt);
-
-    if(syn_pkt.type == SYN && checkPkt(1,&syn_pkt) == 0){
+    parse_pkt(1, cpy, &syn_pkt);
+    fprintf(stderr,"%s%d\n",rev_buf,checksum((uint16_t*)rev_buf,1));
+    if(syn_pkt.type == SYN && checkPkt(1,rev_buf,&syn_pkt) == 0){
         make_pkt(SYNACK, &rep_pkt);
         sprintf(sen_buf,"%d\t%d\n",rep_pkt.type,rep_pkt.checksum);
 
