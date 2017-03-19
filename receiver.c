@@ -63,6 +63,7 @@ int main(int argc, char *argv[])
 		}
 		else if (numRead == 0)
 			break;
+        printf("BUF CONTENT : %s\n", buf); // TODO: remove when submit
 		fwrite(buf, 1, numRead, outputFile);
 	}
 

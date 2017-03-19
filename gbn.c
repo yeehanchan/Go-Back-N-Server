@@ -1,14 +1,35 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <stdbool.h>
 #include "gbn.h"
 
+#define TIMEOUT 1 //timeout seconds
+int timeout;
+void handle_sigalrm(int signo, siginfo_t *siginfo, void *context)
+{
+    //alert when timed out
+    alarm(TIMEOUT);
+    timeout = 1;
+}
+
+size_t min(size_t a, size_t b) {
+    return a < b ? a : b;
+}
 
 void gbn_init(){
+
+    s = *(state_t*)malloc(sizeof(s));
     s.state_type = CLOSED;
     s.socklen = sizeof(struct sockaddr);
-    s.base = 0;
-    s.nextseq = 0;
-    s.last_acked = -1;
-    s.seq = -1;
-    s.mode = 0;
+//    s.base = 0;
+//    s.nextseq = 0;
+//    s.last_acked = -1;
+//    s.seq = -1;
+    s.windowSize = 1;
+    s.curr_seqNum = (uint8_t)rand();
+    s.mode = SLOW; // protocol will start in slow mode
 }
 
 
@@ -30,6 +51,28 @@ int checkPkt(int type, gbnhdr *pkt){
     }
     return 1;
 }
+
+
+// should align make_packet method with yeehan
+gbnhdr make_packet(int packet_type, uint8_t packet_sequence, char * data, int data_length){
+    gbnhdr packet;
+    packet.type = packet_type;
+    packet.seqnum = packet_sequence;
+    packet.checksum = 0 ; // need to double checksum initalization value
+    if (data_length > 0){ // meaning this is a packet with data
+        if (data_length < BUFF_SIZE){
+            memcpy(packet.data, data, data_length);
+        }
+        else{ // need to split data because data is too large . Just cut it now. TODO: split the bigdata peroperly
+            memcpy(packet.data, data, BUFF_SIZE);
+        }
+    }
+    else{ // this is a packet with symbol indication
+        strcpy(packet.data, "");
+    }
+    return packet;
+}
+
 
 
 // make packet based on type
@@ -168,27 +211,105 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
         return(-1);
     }
 
-    char *token;
-    struct sockaddr *server = s.server;
-    socklen_t socklen = s.socklen;
-    struct gbnhdr* pkts[];
+//    char *token;
+//    struct sockaddr *server = s.server;
+//    socklen_t socklen = s.socklen;
+//    struct gbnhdr* pkts[];
+//
+//
+//    while(token = strsep(&buf,"\n") != NULL){
+//        if(strlen(token) > DATALEN){
+//            /*TODO: split */
+//        }
+//        else{
+//            /*TODO: make pkt*/
+//        }
+//    }
+//
+//    /*TODO: sliding window*/
+//
+//	return EXIT_SUCCESS; // return 0
+
+    //set state machine
+    s.windowSize = 2;
+    s.curr_seqNum = rand();
+    s.mode = SLOW;
 
 
-    while(token = strsep(&buf,"\n") != NULL){
-        if(strlen(token) > DATALEN){
-            /*TODO: split */
+    size_t curr_size = 0;
+    size_t occupied_size = 0;
+
+    gbnhdr * data_packet = malloc(sizeof(*data_packet));
+
+    while (1){
+        if (occupied_size >= len){
+            break;
         }
         else{
-            /*TODO: make pkt*/
+            if (occupied_size == 0){ // first data packet
+                if (len >= BUFF_SIZE){
+                    // TODO : split data packet Here just cut it down
+                    curr_size = BUFF_SIZE;
+                }
+                curr_size = min(BUFF_SIZE, len);
+
+                int attempts = 0;
+
+                char tmp_buf[BUFF_SIZE];
+                memset(tmp_buf, '\0', sizeof(tmp_buf)); // reset tmp_buf incase pre occupied
+                memcpy(tmp_buf, buf + occupied_size, curr_size);
+                strcpy(data_packet, tmp_buf);
+                s.state_type = SYN_RCVD;
+
+                while (s.state_type!= ACK_RCVD && attempts < 5){
+                    // send the packet
+                    gbnhdr this_packet = make_packet(DATA, s.curr_seqNum, data_packet, curr_size);
+                    alarm(TIMEOUT);
+                    s.state_type = DATA_SENDING;
+                    if (sendto(sockfd, &this_packet, sizeof(this_packet), 0, s.client, s.socklen) == -1 || errno == EINTR){
+                        attempts ++;
+                        printf("Send data packet sending failed. Attemps++");
+                    }
+                    else{ // sended
+                        // prepare dataAckPacket
+                        gbnhdr * data_ack_packet = malloc(sizeof(*data_ack_packet));
+                        if (recvfrom(sockfd, data_ack_packet, sizeof(*data_ack_packet), 0, s.server, s.socklen) == -1 || data_ack_packet->type!=DATAACK){
+                            attempts ++;
+                            printf("Send data packet out. But no proper data ACK back Attemps++");
+                        }
+                        else if (data_ack_packet->seqnum != s.curr_seqNum){
+                            attempts++;
+                            printf("need to resend due to error order packet ACK");
+                        }
+                        else{
+                            s.state_type = ACK_RCVD;
+                            s.mode = FAST ; // first packet received, switch to fast mode
+                        }
+                    }
+                }
+
+                // send and ack successfully, update rest buffer parameters
+                occupied_size += curr_size;
+                len -= curr_size;
+                s.state_type = ESTABLISHED;
+
+                if (attempts >= 5){ // not send correctly for 5 times, close connection
+                    s.state_type = CLOSED;
+                    return -1; //
+                }
+
+            }
+            else{ // start to send the second packet
+                if (s.mode = FAST) { // 万箭齐发
+
+                }
+
+            }
         }
     }
 
-    /*TODO: sliding window*/
 
-	return EXIT_SUCCESS;
 }
-
-
 
 
 // need to be modified later
@@ -213,59 +334,105 @@ int gbn_close(int sockfd){
 int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
-    gbn_init();
-    
+    gbn_init(); // pangjac: ?? added at gbn_socket()
+    s.server = server;
+    s.socklen = socklen;
+
+    // if sockfd iteslet not valid
+    if (sockfd < 0){
+        return -1;
+    }
+
+    int attempts = 5;
+
     ssize_t senlen, revlen;
     char syn_buf[BUFF_SIZE], rev_buf[BUFF_SIZE];
     gbnhdr syn_packet, syn_ack_pkt;
 
-
-
-
-    // make a syn pkt
-    make_pkt(SYN, &syn_packet);
-    sprintf(syn_buf,"%d\t%d\n",syn_packet.type,syn_packet.checksum);
-
-    // send a syn pkt to server
-    if((senlen = sendto(sockfd, syn_buf, BUFF_SIZE, 0, server, socklen) == -1)){
-        close(sockfd);
-        return(-1);
-    }
+    syn_packet = make_packet(SYN, 0, NULL, 0);
+    //start to set state
     s.state_type = SYN_SENT;
-    s.server = server;
+    s.windowSize = 1;
+    // do not set sending mode until calling gbn_send()
 
-    /* TODO: SET TIMER here. */
+    while(s.state_type == SYN_SENT && attempts < 5){
+        //sending syn
+        if(sendto(sockfd, &syn_packet, sizeof(syn_packet),0,server,socklen) == -1){
+            perror("Couldn't send syn packet");
+            s.state_type =CLOSED;
+            return -1;
+        }
+        // syn send
+        alarm(TIMEOUT); // start timer
+        attempts ++;
 
-    /* TODO: IF NOTHING BACK, SEND AGAIN */
+        // start to check whehther SYNACK back
+        if (errno == EINTR){
+            printf("SYNACK NEVER BACK, TIMEOUT\n");
+            attempts++;
+        }
+        else{ // wait a SYNACK back
+            // buff from the ACK
+            if (recvfrom(sockfd, &syn_ack_pkt, sizeof (syn_ack_pkt), 0, server, socklen) != -1 && syn_ack_pkt.type == SYNACK){
+                s.state_type = ESTABLISHED;
+                printf("GOT SYNACK from server, state ESTABLISHED");
+                return 0;
+            }
+            else{
+                printf("SYNACK NOT RECEIVED PROPERLY, TRY AGAIN\n");
+                attempts++;
+            }
 
-    /* TODO: BREAK CONNECTION IF NO RESPONSE AFTER 5 TIMES */
-
-
-    // receive pkt from server
-    if((revlen = recvfrom(sockfd, rev_buf, BUFF_SIZE, 0, server, &socklen) == -1)){
-        close(sockfd);
-        return(-1);
+        }
     }
 
-    parse_pkt(1, rev_buf, &syn_ack_pkt);
-
-
-    // received a synack
-    if(syn_ack_pkt.type == SYNACK && checkPkt(1, &syn_ack_pkt) == 0){
-        s.state_type = ESTABLISHED;
-        fprintf(stdout,"connection established\n");
-        return EXIT_SUCCESS;
+    if (attempts >=5){
+        printf("attempts exceeds 5 times upper limit. Close");
+        s.state_type = CLOSED;
+        return  -1;
     }
 
-    if(syn_ack_pkt.type == RST){
-        printf("connection rejected");
-        return (-1);
-    }
-
-
-
-
-    return(-1);
+//    // make a syn pkt
+//    make_pkt(SYN, &syn_packet);
+//    sprintf(syn_buf,"%d\t%d\n",syn_packet.type,syn_packet.checksum);
+//
+//    // send a syn pkt to server
+//    if((senlen = sendto(sockfd, syn_buf, BUFF_SIZE, 0, server, socklen) == -1)){
+//        close(sockfd);
+//        return(-1);
+//    }
+//    s.state_type = SYN_SENT;
+//    s.server = server;
+//
+//    /* TODO: SET TIMER here. */
+//
+//    /* TODO: IF NOTHING BACK, SEND AGAIN */
+//
+//    /* TODO: BREAK CONNECTION IF NO RESPONSE AFTER 5 TIMES */
+//
+//
+//    // receive pkt from server
+//    if((revlen = recvfrom(sockfd, rev_buf, BUFF_SIZE, 0, server, &socklen) == -1)){
+//        close(sockfd);
+//        return(-1);
+//    }
+//
+//    parse_pkt(1, rev_buf, &syn_ack_pkt);
+//
+//
+//    // received a synack
+//    if(syn_ack_pkt.type == SYNACK && checkPkt(1, &syn_ack_pkt) == 0){
+//        s.state_type = ESTABLISHED;
+//        fprintf(stdout,"connection established\n");
+//        return EXIT_SUCCESS;
+//    }
+//
+//    if(syn_ack_pkt.type == RST){
+//        printf("connection rejected");
+//        return (-1);
+//    }
+//
+//    return(-1);
 
 }
 
@@ -283,6 +450,10 @@ int gbn_listen(int sockfd, int backlog){
 
 int gbn_bind(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
+    if (sockfd < 0){
+        // has been closed the connection. directly break up
+        return -1;
+    }
 
     if (bind(sockfd, server, socklen) == -1)
     {
@@ -302,10 +473,17 @@ int gbn_socket(int domain, int type, int protocol){
 		
 	/*----- Randomizing the seed. This is used by the rand() function -----*/
 	srand((unsigned)time(0));
-	
 
     int sock_fd;
 
+    gbn_init();
+
+    //sets timeout handler
+    struct sigaction act;
+    memset (&act, '\0', sizeof(act));
+    act.sa_sigaction = &handle_sigalrm;
+    act.sa_flags = 0;
+    sigaction(SIGALRM, &act, NULL);
 
     /* all networked programs must create a socket */
     if ((sock_fd = socket(domain, type, protocol)) == -1)
