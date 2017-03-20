@@ -176,119 +176,119 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
         return(-1);
     }
 
-    int attempts = 0;
-    int UNACK;
-    size_t packetOffset;
-    size_t occupied = 0;
-    int check_data_packet;
-    int check_data_ack;
-    while (len > 0){
-        if (s.state_type == ESTABLISHED){
-            UNACK = 0;
-            packetOffset;
-            // send the windown size in a batch
-            for (int i = 0; i < s.WINDOWSIZE; i++){
-                if (len - (DATALEN - 2) * i > 0){
-                    // make the data packet
-                    size_t data_len = min((len - (DATALEN-2)*i), DATALEN - 2);
-                    gbnhdr data_packet = make_packet(DATA, (uint8_t)(s.curr_seqnum + i), NULL, 0);
-                    memcpy(data_packet.data, (uint16_t *) &data_len, 2);
-                    memcpy(data_packet.data + 2, buf + occupied + packetOffset, data_len);
-                    check_data_packet = checkPkt(&data_packet);
-                    // Kesten suggests to check data integrity, in addition to header TODO need to confirm with Yeehan
-                    packetOffset += data_len;
-
-                    // sending out
-                    if (attempts < 5){
-                        if (maybe_sendto(sockfd, & data_packet, sizeof(data_packet), 0, s.server, s.server_socklen) == -1){
-                            perror("Error on sending data!");
-                            break;
-                        }
-                    }
-                    else{
-                        perror("Exceed attempts upper limit");
-                        errno = 0;
-                        break;
-                    }
-
-                    // send out data
-                    if (i == 0){
-                        alarm(TIMEOUT);
-                    }
-                    UNACK ++;
-
-                }
-            }
-            attempts ++;
-
-            // start to check ACK to switch the mode
-            while (UNACK > 0){
-                gbnhdr * data_ack_packet = malloc(sizeof(*data_ack_packet));
-                if (recvfrom(sockfd, data_ack_packet, sizeof(*data_ack_packet), 0, s.server, s.server_socklen)== -1){
-                    perror("ERROR on receiving on ACK");
-                    //change mode to slow
-                    if (s.WINDOWSIZE > 1){
-                        s.WINDOWSIZE  = 1;
-                    }
-                    break;
-                }
-                else{
-                    printf("Get ACK response \n");
-                    check_data_ack = checkPkt(data_ack_packet);
-                    switch (data_ack_packet->type) {
-                        case DATAACK:
-                            if (check_data_packet != check_data_ack){
-                                return -1;
-                            }
-                            printf("GOT CORRECT ACK BACK \n");
-                            // set sequence number calculation
-                            s.curr_seqnum = data_ack_packet->seqnum;
-                            len -= min(len, (size_t)(DATALEN - 2) * (data_ack_packet->seqnum - s.curr_seqnum));
-                            occupied += min(len, (size_t)(DATALEN - 2) * (data_ack_packet->seqnum - s.curr_seqnum));
-                            // reset attemps
-                            attempts = 0;
-                            // reset alarm
-                            UNACK -= (data_ack_packet->seqnum - s.curr_seqnum);
-                            // reset alarm
-                            if (UNACK > 0){
-                                // still has packegt not responded
-                                alarm(TIMEOUT);
-                            }
-                            else{
-                                alarm(0); // reset alarm for the first packet
-                            }
-                            //reset mode
-                            if (s.WINDOWSIZE < WINDOW_SIZE){
-                                s.WINDOWSIZE = WINDOW_SIZE;
-                            }
-                            break;
-                        case FIN:
-                            if (check_data_packet != check_data_ack){
-                                return -1;
-                            }
-                            printf("GOT FIN BACK \n");
-                            // reset attemps
-                            attempts = 0;
-                            s.state_type = FIN_RCVD;
-                            //reset alarm
-                            alarm(0);
-                            break;
-
-                        case SYNACK:
-                            if (check_data_packet != check_data_ack){
-                                return -1;
-                            }
-                            printf("GOT SYNACK BACK \n");
-
-
-
-                    }
-
-                }
-            }
-
-        }
-    }
+//    int attempts = 0;
+//    int UNACK;
+//    size_t packetOffset;
+//    size_t occupied = 0;
+//    int check_data_packet;
+//    int check_data_ack;
+//    while (len > 0){
+//        if (s.state_type == ESTABLISHED){
+//            UNACK = 0;
+//            packetOffset;
+//            // send the windown size in a batch
+//            for (int i = 0; i < s.WINDOWSIZE; i++){
+//                if (len - (DATALEN - 2) * i > 0){
+//                    // make the data packet
+//                    size_t data_len = min((len - (DATALEN-2)*i), DATALEN - 2);
+//                    gbnhdr data_packet = make_packet(DATA, (uint8_t)(s.curr_seqnum + i), NULL, 0);
+//                    memcpy(data_packet.data, (uint16_t *) &data_len, 2);
+//                    memcpy(data_packet.data + 2, buf + occupied + packetOffset, data_len);
+//                    check_data_packet = checkPkt(&data_packet);
+//                    // Kesten suggests to check data integrity, in addition to header TODO need to confirm with Yeehan
+//                    packetOffset += data_len;
+//
+//                    // sending out
+//                    if (attempts < 5){
+//                        if (maybe_sendto(sockfd, & data_packet, sizeof(data_packet), 0, s.server, s.server_socklen) == -1){
+//                            perror("Error on sending data!");
+//                            break;
+//                        }
+//                    }
+//                    else{
+//                        perror("Exceed attempts upper limit");
+//                        errno = 0;
+//                        break;
+//                    }
+//
+//                    // send out data
+//                    if (i == 0){
+//                        alarm(TIMEOUT);
+//                    }
+//                    UNACK ++;
+//
+//                }
+//            }
+//            attempts ++;
+//
+//            // start to check ACK to switch the mode
+//            while (UNACK > 0){
+//                gbnhdr * data_ack_packet = malloc(sizeof(*data_ack_packet));
+//                if (recvfrom(sockfd, data_ack_packet, sizeof(*data_ack_packet), 0, s.server, s.server_socklen)== -1){
+//                    perror("ERROR on receiving on ACK");
+//                    //change mode to slow
+//                    if (s.WINDOWSIZE > 1){
+//                        s.WINDOWSIZE  = 1;
+//                    }
+//                    break;
+//                }
+//                else{
+//                    printf("Get ACK response \n");
+//                    check_data_ack = checkPkt(data_ack_packet);
+//                    switch (data_ack_packet->type) {
+//                        case DATAACK:
+//                            if (check_data_packet != check_data_ack){
+//                                return -1;
+//                            }
+//                            printf("GOT CORRECT ACK BACK \n");
+//                            // set sequence number calculation
+//                            s.curr_seqnum = data_ack_packet->seqnum;
+//                            len -= min(len, (size_t)(DATALEN - 2) * (data_ack_packet->seqnum - s.curr_seqnum));
+//                            occupied += min(len, (size_t)(DATALEN - 2) * (data_ack_packet->seqnum - s.curr_seqnum));
+//                            // reset attemps
+//                            attempts = 0;
+//                            // reset alarm
+//                            UNACK -= (data_ack_packet->seqnum - s.curr_seqnum);
+//                            // reset alarm
+//                            if (UNACK > 0){
+//                                // still has packegt not responded
+//                                alarm(TIMEOUT);
+//                            }
+//                            else{
+//                                alarm(0); // reset alarm for the first packet
+//                            }
+//                            //reset mode
+//                            if (s.WINDOWSIZE < WINDOW_SIZE){
+//                                s.WINDOWSIZE = WINDOW_SIZE;
+//                            }
+//                            break;
+//                        case FIN:
+//                            if (check_data_packet != check_data_ack){
+//                                return -1;
+//                            }
+//                            printf("GOT FIN BACK \n");
+//                            // reset attemps
+//                            attempts = 0;
+//                            s.state_type = FIN_RCVD;
+//                            //reset alarm
+//                            alarm(0);
+//                            break;
+//
+////                        case SYNACK:
+////                            if (check_data_packet != check_data_ack){
+////                                return -1;
+////                            }
+////                            printf("GOT SYNACK BACK \n");
+//
+//
+//
+//                    }
+//
+//                }
+//            }
+//
+//        }
+//    }
 
 
     return EXIT_SUCCESS;
