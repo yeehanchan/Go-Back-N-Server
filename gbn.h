@@ -75,10 +75,9 @@ typedef struct state_t{
     int client_sockfd;
     int server_sockfd;
     enum STATE state_type;
-    int base; // client side base - 1 is last acked packet
-    int nextseq; //client side
+    int base; // last unacked packet
     int last_acked; //server side
-    int seq; //client side
+    int track; //the next pkt to be sent
     enum MODE mode; // client mode
     char *data[N][DATALEN];
 

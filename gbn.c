@@ -19,10 +19,9 @@ void gbn_init(){
     s.server_socklen = sizeof(struct sockaddr);
     s.client_socklen = sizeof(struct sockaddr_in);
     s.base = 0;
-    s.nextseq = 0;
     s.last_acked = -1;
-    s.seq = 0;
-    s.mode = 0;
+    s.track = 0;
+    s.mode = SLOW;
 
 }
 
@@ -51,7 +50,7 @@ int checkPkt(gbnhdr * pkt){
 }
 
 
-int make_data_pkt(gbnhdr * pkt,uint8_t type,uint8_t seq, char *data){
+int make_data_pkt(gbnhdr * pkt,uint8_t type,int seq, char *data){
 
     pkt->type = type;
     pkt->seqnum = seq;
@@ -136,6 +135,11 @@ void handle_timeout()
 
 
 
+void gbn_send_timeout() {
+    printf("TIMEOUT HAPPENED.");
+}
+
+
 
 
 
@@ -154,13 +158,21 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
         return(-1);
     }
 
+
+    struct sigaction sact = {
+            .sa_handler = &gbn_send_timeout,
+            .sa_flags = 0,
+    };
+    sigaction(SIGALRM, &sact, NULL);
+
     char *token;
     struct sockaddr *server = s.server;
     socklen_t socklen = s.server_socklen;
-    int i;
-//
-//
-    if(s.seq < N){
+    int i,attempts = 0;
+    ssize_t revlen,sendlen;
+
+
+    if(s.track < N){
         while((token = strsep(&buf,"\n")) != NULL){
 
             char *p = token;
@@ -169,33 +181,142 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
             if(len > DATALEN){
 
                 while(len > 0){
-                    strncpy(s.data[s.seq],p,DATALEN);
+                    strncpy(s.data[s.track],p,DATALEN);
                     p = p + DATALEN;
                     len -= DATALEN;
-                    s.seq++;
+                    s.track++;
 
                 }
 
             }
             else{
-                strcpy(s.data[s.seq],token);
-                s.seq++;
+                strcpy(s.data[s.track],token);
+                s.track++;
             }
         }
 
     }else{
         fprintf(stderr,"buffer too long\n");
     }
-
+    s.track = 0;
 
 //    /*TODO: sliding window*/
 
-    gbnhdr data_packet;
-    make_pkt(FIN,&data_packet);
-    if(sendto(sockfd, &data_packet, BUFF_SIZE, 0, server, socklen) == -1){
-        return(-1);
+
+    while(s.track < 5){
+
+        fprintf(stderr,"track number %d \n",s.track);
+
+        // In slow mode, packet not sent until last packet was acked
+        if(s.mode == SLOW){
+
+
+            // if last packet is acked, send new packet s.track
+            while(attempts < 5 && s.track == s.base){
+
+                fprintf(stderr, "attempts %d \n", attempts);
+
+                // send packet nextseq
+                gbnhdr *data_packet = malloc(sizeof(struct gbnhdr*));
+                gbnhdr *data_ack = malloc(sizeof(struct gbnhdr*));
+
+
+                make_data_pkt(data_packet,DATA,s.track,s.data[s.track]);
+                if(sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
+                    fprintf(stderr,"data packet sent error \n");
+                    attempts++;
+                }
+
+                fprintf(stderr,"client sent unacked pkt seq %d \n",data_packet->seqnum);
+                alarm(TIMEOUT);
+
+
+
+                if(recvfrom(sockfd, data_ack, BUFF_SIZE, 0, server, &socklen) == -1){
+                    fprintf(stderr,"acked packet received error \n");
+                    attempts++;
+                }
+
+                if(errno == EINTR){
+                    attempts++;
+                }
+                else if(data_ack->data[0] != data_packet->seqnum){
+                    fprintf(stderr,"acked packet is not sent packet \n");
+                    attempts++;
+                }
+                else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
+                    s.base = s.track +1;
+                    s.track++;
+                    fprintf(stderr,"client received ack %d \n",data_ack->data[0]);
+                    break;
+                }
+
+            }
+
+            if(attempts == 5){
+                fprintf(stderr,"5 Attempts! Quit!");
+                /*TODO: SEND FIN*/
+                return(-1);
+            }
+
+            attempts = 0;
+            // if last packet was not acked, send last packet
+
+
+            gbnhdr *data_packet = malloc(sizeof(struct gbnhdr*));
+            gbnhdr *data_ack = malloc(sizeof(struct gbnhdr*));
+
+            while(attempts < 5 && s.base < s.track){
+
+                fprintf(stderr, "attempts %d \n", attempts);
+                make_data_pkt(data_packet,DATA,s.base,s.data[s.base]);
+                if(sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
+                    fprintf(stderr,"data packet sent error \n");
+                    attempts++;
+                }
+
+                fprintf(stderr,"client sent unacked pkt %d \n",data_packet->seqnum);
+                alarm(TIMEOUT);
+
+
+
+                if((revlen = recvfrom(sockfd, data_ack, BUFF_SIZE, 0, server, &socklen) == -1)){
+                    fprintf(stderr,"acked packet received error \n");
+                    attempts++;
+                }
+
+                if(errno == EINTR){
+                    attempts++;
+                }
+                else if(data_ack->data[0] != data_packet->seqnum){
+                    fprintf(stderr,"acked packet is not sent packet \n");
+                    attempts++;
+                }
+                else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
+                    s.base++;
+                    fprintf(stderr,"client received ack %d \n",data_ack->data[0]);
+                    break;
+                }
+            }
+
+            if(attempts == 5){
+                fprintf(stderr,"5 Attempts! Quit!");
+                /*TODO: SEND FIN*/
+                return(-1);
+            }
+
+            attempts = 0;
+
+
+        } //fast mode
+        else{
+
+        }
+
     }
-    fprintf(stderr,"client sent pkt %d \n",data_packet.type);
+
+
+
 	return EXIT_SUCCESS;
 }
 
@@ -239,7 +360,8 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
             strcpy((char *) buf, tmp);
 
             //ack to client
-            char *ack = data_pkt->seqnum+"0";
+            char *ack;
+            sprintf(ack,"%d",data_pkt->seqnum);
             make_data_pkt(data_ack,DATAACK,data_pkt->seqnum+1,ack);
             maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
             s.last_acked++;
