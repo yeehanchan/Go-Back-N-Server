@@ -1,5 +1,9 @@
 #include "gbn.h"
 
+size_t min(size_t a, size_t b) {
+    return a < b ? a : b;
+}
+
 uint16_t checksum(uint16_t *buf, int nwords)
 {
     uint32_t sum;
@@ -135,12 +139,29 @@ void handle_timeout()
 }
 
 
+gbnhdr make_packet(int packet_type, uint8_t packet_sequence, char * data, int data_length){
+    gbnhdr packet;
+    packet.type = packet_type;
+    packet.seqnum = packet_sequence;
+    packet.checksum = 0 ; // need to double checksum initalization value
+    if (data_length > 0){ // meaning this is a packet with data
+        if (data_length < BUFF_SIZE){
+            memcpy(packet.data, data, data_length);
+        }
+        else{ // need to split data because data is too large . Just cut it now. TODO: split the bigdata peroperly
+            memcpy(packet.data, data, BUFF_SIZE);
+        }
+    }
+    else{ // this is a packet with symbol indication
+        strcpy(packet.data, "");
+    }
+    return packet;
+}
 
 
 
 
-
-// need to be modified later
+// logic was discussed with Evan Kesten
 ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	
 
@@ -154,49 +175,111 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
         return(-1);
     }
 
-    char *token;
     struct sockaddr *server = s.server;
     socklen_t socklen = s.server_socklen;
-    int i;
-//
-//
-    if(s.seq < N){
-        while((token = strsep(&buf,"\n")) != NULL){
 
-            char *p = token;
-            int len = strlen(token);
-            // split oversized packet
-            if(len > DATALEN){
+//    // make the DATA
+//    gbnhdr data = make_packet(DATA, s.seq);
+//
+//    // make the DATAACK
+//    gbnhdr data_ack = make_packet(DATAACK, );
 
-                while(len > 0){
-                    strncpy(s.data[s.seq],p,DATALEN);
-                    p = p + DATALEN;
-                    len -= DATALEN;
-                    s.seq++;
+    int attempts = 0;
+    int UNACK;
+    size_t packetOffset;
+    size_t occupied = 0;
+    while (len > 0){
+        if (s.state_type == ESTABLISHED){
+            UNACK = 0;
+            packetOffset;
+            // send the windown size in a batch
+            for (int i = 0; i < WINDOW_SIZE; i++){
+                if (len - (DATALEN - 2) * i > 0){
+                    // make the data packet
+                    size_t data_len = min((len - (DATALEN-2)*i), DATALEN - 2);
+                    gbnhdr data_packet = make_packet(DATA, (uint8_t)(s.curr_seqnum + i), NULL, 0);
+                    memcpy(data_packet.data, (uint16_t *) &data_len, 2);
+                    memcpy(data_packet.data + 2, buf + occupied + packetOffset, data_len);
+                    // Kesten suggests to check data integrity, in addition to header TODO need to confirm with Yeehan
+                    packetOffset += data_len;
+
+                    // sending out
+                    if (attempts < 5){
+                        if (maybe_sendto(sockfd, & data_packet, sizeof(data_packet), 0, s.server, s.server_socklen) == -1){
+                            perror("Error on sending data!");
+                            break;
+                        }
+                    }
+                    else{
+                        perror("Exceed attempts upper limit");
+                        errno = 0;
+                        break;
+                    }
+
+                    // send out data
+                    if (i == 0){
+                        alarm(TIMEOUT);
+                    }
+                    UNACK ++;
 
                 }
+            }
+            attempts ++;
 
+            // start to check ACK to switch the mode
+            while (UNACK > 0){
+                if (recvfrom(sockfd, ))
             }
-            else{
-                strcpy(s.data[s.seq],token);
-                s.seq++;
-            }
+
         }
-
-    }else{
-        fprintf(stderr,"buffer too long\n");
     }
 
 
-//    /*TODO: sliding window*/
+//    // Yeehan original version
+//    char *token;
+//    struct sockaddr *server = s.server;
+//    socklen_t socklen = s.server_socklen;
+//    int i;
+////
+////
+//    if(s.seq < N){
+//        while((token = strsep(&buf,"\n")) != NULL){
+//
+//            char *p = token;
+//            int len = strlen(token);
+//            // split oversized packet
+//            if(len > DATALEN){
+//
+//                while(len > 0){
+//                    strncpy(s.data[s.seq],p,DATALEN);
+//                    p = p + DATALEN;
+//                    len -= DATALEN;
+//                    s.seq++;
+//
+//                }
+//
+//            }
+//            else{
+//                strcpy(s.data[s.seq],token);
+//                s.seq++;
+//            }
+//        }
+//
+//    }else{
+//        fprintf(stderr,"buffer too long\n");
+//    }
+//
+//
+////    /*TODO: sliding window*/
+//
+//    gbnhdr data_packet;
+//    make_pkt(FIN,&data_packet);
+//    if(sendto(sockfd, &data_packet, BUFF_SIZE, 0, server, socklen) == -1){
+//        return(-1);
+//    }
+//    fprintf(stderr,"client sent pkt %d \n",data_packet.type);
 
-    gbnhdr data_packet;
-    make_pkt(FIN,&data_packet);
-    if(sendto(sockfd, &data_packet, BUFF_SIZE, 0, server, socklen) == -1){
-        return(-1);
-    }
-    fprintf(stderr,"client sent pkt %d \n",data_packet.type);
-	return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
 
 

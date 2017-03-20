@@ -82,6 +82,8 @@ typedef struct state_t{
     enum MODE mode; // client mode
     char *data[N][DATALEN];
 
+    uint8_t curr_seqnum; // current sequence number
+
 } state_t;
 
 state_t s;
@@ -103,6 +105,9 @@ ssize_t  maybe_sendto(int  s, const void *buf, size_t len, int flags, \
                       const struct sockaddr *to, socklen_t tolen);
 
 uint16_t checksum(uint16_t *buf, int nwords);
+
+
+#include <stdio.h>
 
 
 #endif
