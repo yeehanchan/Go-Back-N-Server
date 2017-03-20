@@ -29,6 +29,7 @@ extern int errno;
 #define DATALEN   10    /* length of the payload                       */
 #define N         1024    /* Max number of packets a single call to gbn_send can process */
 #define TIMEOUT      1    /* timeout to resend packets (1 second)        */
+#define CONNECTION_RETRY_LIMIT   5
 
 /*----- Packet types -----*/
 #define SYN      0        /* Opens a connection                          */
@@ -70,6 +71,8 @@ typedef struct state_t{
     struct sockaddr *client;
     struct sockaddr *server;
     socklen_t socklen;
+    int client_sockfd;
+    int server_sockfd;
     enum STATE state_type;
     uint8_t base; // client side base - 1 is last acked packet
     uint8_t nextseq; //client side
@@ -81,8 +84,7 @@ typedef struct state_t{
 } state_t;
 
 state_t s;
-
-
+int conn_retry_counts;
 
 void gbn_init();
 void set_gbn_state(enum STATE state);

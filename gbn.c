@@ -23,21 +23,23 @@ void gbn_init(){
     s.last_acked = -1;
     s.seq = -1;
     s.mode = 0;
+
 }
 
 
 
 
+
 //check interity
-int checkPkt(int type, char *buf, gbnhdr * pkt){
+int checkPkt(gbnhdr * pkt){
 
     uint16_t cs;
-    if(type == 0){
+    if(pkt->type == DATA){
         //TODO: change value
-         cs = checksum((uint16_t *)buf, 2);
+         cs = checksum((uint16_t *)pkt, 3);
     }
     else{
-        cs = checksum((uint16_t *)buf, 1);
+        cs = checksum((uint16_t *)pkt, 1);
     }
     if(cs == pkt->checksum){
         return 0;
@@ -49,40 +51,33 @@ int checkPkt(int type, char *buf, gbnhdr * pkt){
 // make packet based on type
 int make_pkt(uint8_t type, gbnhdr * pkt){
 
-    char *buf;
     switch(type) {
         case SYN :
             pkt->type = SYN;
-            sprintf(buf,"%d\t",pkt->type);
-            pkt->checksum = checksum((uint16_t*)buf,1);
-            fprintf(stderr,"client side checksum %d\n",pkt->checksum);
+            pkt->checksum = checksum((uint16_t*)pkt,1);
             return EXIT_SUCCESS;
 
         case SYNACK :
             pkt->type = SYNACK;
-            sprintf(buf,"%d\t",pkt->type);
-            pkt->checksum = checksum((uint16_t*)buf,1);
+            pkt->checksum = checksum((uint16_t*)pkt,1);
             return EXIT_SUCCESS;
 
 
         case FIN :
 
             pkt->type = FIN;
-            sprintf(buf,"%d\t",pkt->type);
-            pkt->checksum = checksum((uint16_t*)buf,1);
+            pkt->checksum = checksum((uint16_t*)pkt,1);
             return EXIT_SUCCESS;
 
         case FINACK :
 
             pkt->type = FINACK;
-            sprintf(buf,"%d\t",pkt->type);
-            pkt->checksum = checksum((uint16_t*)buf,1);
+            pkt->checksum = checksum((uint16_t*)pkt,1);
             return EXIT_SUCCESS;
         case RST :
 
             pkt->type = RST;
-            sprintf(buf,"%d\t",pkt->type);
-            pkt->checksum = checksum((uint16_t*)buf,1);
+            pkt->checksum = checksum((uint16_t*)pkt,1);
             return EXIT_SUCCESS;
     }
 
@@ -90,51 +85,32 @@ int make_pkt(uint8_t type, gbnhdr * pkt){
     return(-1);
 }
 
-// parse packet
-int parse_pkt(uint8_t type, char *buff, gbnhdr* pkt){
 
-    char *token;
-    int i, j;
+void handle_timeout()
+{
+    //alert when timed out
+    if(conn_retry_counts < CONNECTION_RETRY_LIMIT){
 
-
-    // only DATA pkt required four fields. Other pkt types only have type| checksum fields
-    if(type == 0){
-        for(i = 0; i < 4; i++){
-
-            token = strsep(&buff, "\t");
-            switch (i){
-                case 0:
-                    pkt->type = atoi(token);
-                    break;
-                case 1:
-                    pkt->seqnum = atoi(token);
-                    break;
-                case 2:
-                    pkt->checksum = atoi(token);
-                    break;
-                case 3:
-                    break;
-            }
+        gbnhdr syn_packet;
+        make_pkt(SYN, &syn_packet);
+        // send a syn pkt to server
+        if((maybe_sendto(s.client_sockfd, &syn_packet, BUFF_SIZE, 0, s.server, s.socklen) == -1)){
+            close(s.client_sockfd);
+            exit(-1);
         }
+        conn_retry_counts ++;
+        fprintf(stderr,"retry %d: client sent struct %d %d\n",conn_retry_counts,syn_packet.type,syn_packet.checksum);
+        alarm(TIMEOUT);
     }else{
-
-        for(i = 0; i < 2; i++){
-
-            token = strsep(&buff, "\t");
-            switch (i){
-                case 0:
-
-                    pkt->type = atoi(token);
-                    break;
-                case 1:
-                    pkt->checksum = atoi(token);
-                    break;
-            }
-        }
+        close(s.client_sockfd);
+        fprintf(stderr,"reached connection try limit, close client socket \n");
+        exit(0);
     }
-
-    return EXIT_SUCCESS;
 }
+
+
+
+
 
 
 
@@ -155,40 +131,36 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
     char *token;
     struct sockaddr *server = s.server;
     socklen_t socklen = s.socklen;
-    struct gbnhdr* pkts[N];
-    char * data[N];
+    struct gbnhdr *pkts = malloc(N* sizeof(struct gbnnhdr*));
     int i;
 
 
-    if(s.seq < N){
-        while((token = strsep(&buf,"\n")) != NULL){
-
-            char *p = token;
-            int len = strlen(token);
-
-            // split oversized packet
-            if(len > DATALEN){
-
-                while(len > 0){
-                    data[(int)s.seq] = malloc(sizeof(char)*DATALEN);
-                    strncpy(data[(int)s.seq],p,DATALEN);
-                    p = p + DATALEN;
-                    len -= DATALEN;
-                    s.seq++;
-
-                }
-
-            }
-            else{
-                strcpy(data[(int)s.seq],token);
-                s.seq++;
-            }
-        }
-
-    }else{
-        fprintf(stderr,"buffer too long\n");
-    }
-
+//    if(s.seq < N){
+//        while((token = strsep(&buf,"\n")) != NULL){
+//
+//            char *p = token;
+//            int len = strlen(token);
+//            // split oversized packet
+//            if(len > DATALEN){
+//
+//                while(len > 0){
+//                    strncpy(pkts[s.seq].data,p,DATALEN);
+//                    p = p + DATALEN;
+//                    len -= DATALEN;
+//                    s.seq++;
+//
+//                }
+//
+//            }
+//            else{
+//                strcpy(pkts[s.seq]->data,token);
+//                s.seq++;
+//            }
+//        }
+//
+//    }else{
+//        fprintf(stderr,"buffer too long\n");
+//    }
 
 
 
@@ -212,7 +184,6 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
 int gbn_close(int sockfd){
 
     close(sockfd);
-
 	return EXIT_SUCCESS;
 }
 
@@ -225,58 +196,55 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
     gbn_init();
 
     ssize_t senlen, revlen;
-    char syn_buf[BUFF_SIZE], rev_buf[BUFF_SIZE], copy[50];
     gbnhdr syn_packet, syn_ack_pkt;
-
-
-
+    s.server = server;
+    s.client_sockfd = sockfd;
 
     // make a syn pkt
     make_pkt(SYN, &syn_packet);
-    sprintf(syn_buf,"%d\t%d\n",syn_packet.type,syn_packet.checksum);
-    // send a syn pkt to server
-    if((senlen = sendto(sockfd, syn_buf, BUFF_SIZE, 0, server, socklen) == -1)){
+    if((senlen = maybe_sendto(sockfd, &syn_packet, BUFF_SIZE, 0, server, socklen) == -1)){
         close(sockfd);
         return(-1);
     }
+
+    fprintf(stderr,"client sent struct  %d %d\n",syn_packet.type,syn_packet.checksum);
     s.state_type = SYN_SENT;
-    s.server = server;
-    fprintf(stderr,"client sent  %s \n",syn_buf);
 
+    signal(SIGALRM,&handle_timeout);
+    alarm(TIMEOUT);
 
-    /* TODO: SET TIMER here. */
-
-    /* TODO: IF NOTHING BACK, SEND AGAIN */
-
-    /* TODO: BREAK CONNECTION IF NO RESPONSE AFTER 5 TIMES */
-
-
-    // receive pkt from server
-    if((revlen = recvfrom(sockfd, rev_buf, BUFF_SIZE, 0, server, &socklen) == -1)){
-        close(sockfd);
-        return(-1);
-    }
-    strcpy(copy,rev_buf);
-
-    parse_pkt(1, copy, &syn_ack_pkt);
-
-    fprintf(stderr,"client received  %s \n",rev_buf);
-
-    // received a synack
-    if(syn_ack_pkt.type == SYNACK && checkPkt(1, rev_buf,&syn_ack_pkt) == 0){
-        s.state_type = ESTABLISHED;
-        fprintf(stdout,"connection established\n");
+    if(conn_retry_counts == 4){
+        fprintf(stderr,"done \n");
         return EXIT_SUCCESS;
     }
 
-    if(syn_ack_pkt.type == RST){
-        printf("connection rejected\n");
-        return (-1);
+
+    while(conn_retry_counts < CONNECTION_RETRY_LIMIT){
+
+
+        if((revlen = recvfrom(sockfd, &syn_ack_pkt, BUFF_SIZE, 0, server, &socklen) == -1)){
+            close(sockfd);
+            return(-1);
+        }
+
+
+
+        fprintf(stderr,"client received  %d %d\n",syn_ack_pkt.type,syn_ack_pkt.checksum);
+        if(syn_ack_pkt.type == SYNACK && checkPkt(&syn_ack_pkt) == 0){
+            s.state_type = ESTABLISHED;
+            fprintf(stdout,"connection established\n");
+        }
+
+        if(syn_ack_pkt.type == RST){
+            printf("connection rejected\n");
+        }
+
+        return EXIT_SUCCESS;
+
     }
 
 
 
-    return(-1);
 
 }
 
@@ -336,36 +304,39 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
 
     ssize_t revlen, senlen;
     gbnhdr syn_pkt, rep_pkt;
-    char sen_buf[BUFF_SIZE], rev_buf[BUFF_SIZE],cpy[BUFF_SIZE];
 
     printf("listener: waiting for revfrom\n");
 
 
-    if((revlen = recvfrom(sockfd, rev_buf, BUFF_SIZE, 0, client, socklen) == -1)){
+    if((revlen = recvfrom(sockfd, &syn_pkt, BUFF_SIZE, 0, client, socklen) == -1)){
         close(sockfd);
         return(-1);
     }
-    strcpy(cpy,rev_buf);
-
+    fprintf(stderr,"server received struct %d %d \n",syn_pkt.type,syn_pkt.checksum);
+    fprintf(stderr,"server computes checksum %d \n",checksum((uint16_t *)&syn_pkt,1));
     s.state_type = SYN_RCVD;
     s.client = client;
 
-    parse_pkt(1, cpy, &syn_pkt);
-    fprintf(stderr,"%s%d\n",rev_buf,checksum((uint16_t*)rev_buf,1));
-    if(syn_pkt.type == SYN && checkPkt(1,rev_buf,&syn_pkt) == 0){
-        make_pkt(SYNACK, &rep_pkt);
-        sprintf(sen_buf,"%d\t%d\n",rep_pkt.type,rep_pkt.checksum);
 
-        if((senlen = sendto(sockfd, sen_buf, BUFF_SIZE, 0, client, *socklen)) == -1){
+
+
+    if(syn_pkt.type == SYN && checkPkt((uint16_t *)&syn_pkt) == 0){
+
+        make_pkt(SYNACK, &rep_pkt);
+        fprintf(stderr,"server sent struct %d %d \n",rep_pkt.type,rep_pkt.checksum);
+
+        if((senlen = maybe_sendto(sockfd, &rep_pkt, BUFF_SIZE, 0, client, *socklen)) == -1){
             close(sockfd);
             return(-1);
         }
 
-    }else{
-        make_pkt(RST, &rep_pkt);
-        sprintf(sen_buf,"%d\t%d\n",rep_pkt.type,rep_pkt.checksum);
 
-        if((senlen = sendto(sockfd, sen_buf, BUFF_SIZE, 0, client, *socklen)) == -1){
+
+    }else{
+
+        make_pkt(RST, &rep_pkt);
+        fprintf(stderr,"server sent struct %d %d \n",rep_pkt.type,rep_pkt.checksum);
+        if((senlen = maybe_sendto(sockfd, &rep_pkt, BUFF_SIZE, 0, client, *socklen)) == -1){
             close(sockfd);
             return(-1);
         }
