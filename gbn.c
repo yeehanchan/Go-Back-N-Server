@@ -26,7 +26,7 @@ void gbn_init(){
     s.nextseq = 0;
     s.last_acked = -1;
     s.seq = 0;
-    s.mode = 0;
+    s.WINDOWSIZE = 1;
 
 }
 
@@ -172,34 +172,29 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	 */
 
     if(s.state_type != ESTABLISHED){
+        // should have been established
         return(-1);
     }
-
-    struct sockaddr *server = s.server;
-    socklen_t socklen = s.server_socklen;
-
-//    // make the DATA
-//    gbnhdr data = make_packet(DATA, s.seq);
-//
-//    // make the DATAACK
-//    gbnhdr data_ack = make_packet(DATAACK, );
 
     int attempts = 0;
     int UNACK;
     size_t packetOffset;
     size_t occupied = 0;
+    int check_data_packet;
+    int check_data_ack;
     while (len > 0){
         if (s.state_type == ESTABLISHED){
             UNACK = 0;
             packetOffset;
             // send the windown size in a batch
-            for (int i = 0; i < WINDOW_SIZE; i++){
+            for (int i = 0; i < s.WINDOWSIZE; i++){
                 if (len - (DATALEN - 2) * i > 0){
                     // make the data packet
                     size_t data_len = min((len - (DATALEN-2)*i), DATALEN - 2);
                     gbnhdr data_packet = make_packet(DATA, (uint8_t)(s.curr_seqnum + i), NULL, 0);
                     memcpy(data_packet.data, (uint16_t *) &data_len, 2);
                     memcpy(data_packet.data + 2, buf + occupied + packetOffset, data_len);
+                    check_data_packet = checkPkt(&data_packet);
                     // Kesten suggests to check data integrity, in addition to header TODO need to confirm with Yeehan
                     packetOffset += data_len;
 
@@ -228,56 +223,73 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
             // start to check ACK to switch the mode
             while (UNACK > 0){
-                if (recvfrom(sockfd, ))
+                gbnhdr * data_ack_packet = malloc(sizeof(*data_ack_packet));
+                if (recvfrom(sockfd, data_ack_packet, sizeof(*data_ack_packet), 0, s.server, s.server_socklen)== -1){
+                    perror("ERROR on receiving on ACK");
+                    //change mode to slow
+                    if (s.WINDOWSIZE > 1){
+                        s.WINDOWSIZE  = 1;
+                    }
+                    break;
+                }
+                else{
+                    printf("Get ACK response \n");
+                    check_data_ack = checkPkt(data_ack_packet);
+                    switch (data_ack_packet->type) {
+                        case DATAACK:
+                            if (check_data_packet != check_data_ack){
+                                return -1;
+                            }
+                            printf("GOT CORRECT ACK BACK \n");
+                            // set sequence number calculation
+                            s.curr_seqnum = data_ack_packet->seqnum;
+                            len -= min(len, (size_t)(DATALEN - 2) * (data_ack_packet->seqnum - s.curr_seqnum));
+                            occupied += min(len, (size_t)(DATALEN - 2) * (data_ack_packet->seqnum - s.curr_seqnum));
+                            // reset attemps
+                            attempts = 0;
+                            // reset alarm
+                            UNACK -= (data_ack_packet->seqnum - s.curr_seqnum);
+                            // reset alarm
+                            if (UNACK > 0){
+                                // still has packegt not responded
+                                alarm(TIMEOUT);
+                            }
+                            else{
+                                alarm(0); // reset alarm for the first packet
+                            }
+                            //reset mode
+                            if (s.WINDOWSIZE < WINDOW_SIZE){
+                                s.WINDOWSIZE = WINDOW_SIZE;
+                            }
+                            break;
+                        case FIN:
+                            if (check_data_packet != check_data_ack){
+                                return -1;
+                            }
+                            printf("GOT FIN BACK \n");
+                            // reset attemps
+                            attempts = 0;
+                            s.state_type = FIN_RCVD;
+                            //reset alarm
+                            alarm(0);
+                            break;
+
+                        case SYNACK:
+                            if (check_data_packet != check_data_ack){
+                                return -1;
+                            }
+                            printf("GOT SYNACK BACK \n");
+
+
+
+                    }
+
+                }
             }
 
         }
     }
 
-
-//    // Yeehan original version
-//    char *token;
-//    struct sockaddr *server = s.server;
-//    socklen_t socklen = s.server_socklen;
-//    int i;
-////
-////
-//    if(s.seq < N){
-//        while((token = strsep(&buf,"\n")) != NULL){
-//
-//            char *p = token;
-//            int len = strlen(token);
-//            // split oversized packet
-//            if(len > DATALEN){
-//
-//                while(len > 0){
-//                    strncpy(s.data[s.seq],p,DATALEN);
-//                    p = p + DATALEN;
-//                    len -= DATALEN;
-//                    s.seq++;
-//
-//                }
-//
-//            }
-//            else{
-//                strcpy(s.data[s.seq],token);
-//                s.seq++;
-//            }
-//        }
-//
-//    }else{
-//        fprintf(stderr,"buffer too long\n");
-//    }
-//
-//
-////    /*TODO: sliding window*/
-//
-//    gbnhdr data_packet;
-//    make_pkt(FIN,&data_packet);
-//    if(sendto(sockfd, &data_packet, BUFF_SIZE, 0, server, socklen) == -1){
-//        return(-1);
-//    }
-//    fprintf(stderr,"client sent pkt %d \n",data_packet.type);
 
     return EXIT_SUCCESS;
 }
@@ -462,7 +474,9 @@ int gbn_socket(int domain, int type, int protocol){
 		
 	/*----- Randomizing the seed. This is used by the rand() function -----*/
 	srand((unsigned)time(0));
-	
+
+
+
 
     int sock_fd;
 

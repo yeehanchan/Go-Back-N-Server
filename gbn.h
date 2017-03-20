@@ -83,6 +83,7 @@ typedef struct state_t{
     char *data[N][DATALEN];
 
     uint8_t curr_seqnum; // current sequence number
+    int WINDOWSIZE;
 
 } state_t;
 
