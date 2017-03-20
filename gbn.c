@@ -1,5 +1,9 @@
 #include "gbn.h"
 
+size_t min(size_t a, size_t b) {
+    return a < b ? a : b;
+}
+
 uint16_t checksum(uint16_t *buf, int nwords)
 {
     uint32_t sum;
@@ -134,6 +138,24 @@ void handle_timeout()
 }
 
 
+gbnhdr make_packet(int packet_type, uint8_t packet_sequence, char * data, int data_length){
+    gbnhdr packet;
+    packet.type = packet_type;
+    packet.seqnum = packet_sequence;
+    packet.checksum = 0 ; // need to double checksum initalization value
+    if (data_length > 0){ // meaning this is a packet with data
+        if (data_length < BUFF_SIZE){
+            memcpy(packet.data, data, data_length);
+        }
+        else{ // need to split data because data is too large . Just cut it now. TODO: split the bigdata peroperly
+            memcpy(packet.data, data, BUFF_SIZE);
+        }
+    }
+    else{ // this is a packet with symbol indication
+        strcpy(packet.data, "");
+    }
+    return packet;
+}
 
 void gbn_send_timeout() {
     printf("TIMEOUT HAPPENED.");
@@ -143,8 +165,7 @@ void gbn_send_timeout() {
 
 
 
-
-// need to be modified later
+// logic was discussed with Evan Kesten
 ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	
 
@@ -155,6 +176,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	 */
 
     if(s.state_type != ESTABLISHED){
+        // should have been established
         return(-1);
     }
 
@@ -199,8 +221,6 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
         fprintf(stderr,"buffer too long\n");
     }
     s.track = 0;
-
-//    /*TODO: sliding window*/
 
 
     while(s.track < 5){
@@ -318,6 +338,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
 
 	return EXIT_SUCCESS;
+
 }
 
 
@@ -501,7 +522,9 @@ int gbn_socket(int domain, int type, int protocol){
 		
 	/*----- Randomizing the seed. This is used by the rand() function -----*/
 	srand((unsigned)time(0));
-	
+
+
+
 
     int sock_fd;
 
