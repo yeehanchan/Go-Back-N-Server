@@ -16,7 +16,7 @@
 #include<time.h>
 
 #define WINDOW_SIZE   2
-#define BUFF_SIZE  1024
+#define BUFF_SIZE  1028
 
 
 /*----- Error variables -----*/
@@ -70,16 +70,17 @@ typedef struct state_t{
     /* TODO: Your state information could be encoded here. */
     struct sockaddr *client;
     struct sockaddr *server;
-    socklen_t socklen;
+    socklen_t server_socklen;
+    socklen_t client_socklen;
     int client_sockfd;
     int server_sockfd;
     enum STATE state_type;
-    uint8_t base; // client side base - 1 is last acked packet
-    uint8_t nextseq; //client side
-    uint8_t last_acked; //server side
-    uint8_t seq; //client side
+    int base; // client side base - 1 is last acked packet
+    int nextseq; //client side
+    int last_acked; //server side
+    int seq; //client side
     enum MODE mode; // client mode
-
+    char *data[N][DATALEN];
 
 } state_t;
 
