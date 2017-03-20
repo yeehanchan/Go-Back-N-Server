@@ -54,8 +54,8 @@ enum STATE{
 	SYN_SENT,
 	SYN_RCVD,
 	ESTABLISHED,
-    DATA_SENDING,
-    ACK_RCVD,
+    DATA_SENDING, // pangjac added
+    ACK_RCVD, // pangjac added
 	FIN_SENT,
 	FIN_RCVD
 };
@@ -74,10 +74,10 @@ typedef struct state_t{
     struct sockaddr addr; // will switch to either *client or *server when impelmentation explictly
     socklen_t socklen;
     enum STATE state_type;
-//    uint8_t base; // client side base - 1 is last acked packet
-//    uint8_t nextseq; //client side
-//    uint8_t last_acked; //server side
-//    uint8_t seq; //client side
+    uint8_t base; // client side base - 1 is last acked packet
+    uint8_t nextseq; //client side
+    uint8_t last_acked; //server side
+    uint8_t seq; //client side
     uint8_t curr_seqNum; // judge its relationship with base, nextseq lasr_acked and seq when implementation explictly
     enum MODE mode; // client mode
     uint8_t windowSize; // pangjac added
