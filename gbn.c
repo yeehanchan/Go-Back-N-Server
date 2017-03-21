@@ -133,27 +133,9 @@ void handle_timeout()
 }
 
 
-gbnhdr make_packet(int packet_type, uint8_t packet_sequence, char * data, int data_length){
-    gbnhdr packet;
-    packet.type = packet_type;
-    packet.seqnum = packet_sequence;
-    packet.checksum = 0 ; // need to double checksum initalization value
-    if (data_length > 0){ // meaning this is a packet with data
-        if (data_length < BUFF_SIZE){
-            memcpy(packet.data, data, data_length);
-        }
-        else{ // need to split data because data is too large . Just cut it now. TODO: split the bigdata peroperly
-            memcpy(packet.data, data, BUFF_SIZE);
-        }
-    }
-    else{ // this is a packet with symbol indication
-        strcpy(packet.data, "");
-    }
-    return packet;
-}
 
 void gbn_send_timeout() {
-    printf("TIMEOUT HAPPENED.");
+    fprintf(stderr,"TIMEOUT.\n");
 }
 
 
@@ -228,9 +210,9 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
 
 
-    while(s.track < 10){
+    while(s.track < 20){
 
-        fprintf(stderr,"track number %d \n",s.track);
+        fprintf(stderr,"track number: %d ",s.track);
 
         // In Fast mode
         if(s.mode == FAST){
@@ -279,9 +261,15 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
             }
             /*if time out, wait for ack of second packet*/
             if(errno == EINTR){
+                fprintf(stderr,"first acked timeout \n");
             }
             else if(data_ack->data[0] != data_packet->seqnum){
                 fprintf(stderr,"first acked is not expected \n");
+                if(data_ack->data[0] > s.base - 1){
+                    s.base = data_ack->data[0] + 1;
+                    s.track = s.base;
+                }
+
             }
             else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
                 s.base = s.track + 1;
@@ -304,6 +292,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
             }
             /*if timeout, break the loop*/
             if(errno == EINTR){
+                fprintf(stderr,"second acked timeout \n");
                 if(s.base == s.track + 1){
                     s.track++;
                 }else{
@@ -318,6 +307,12 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
                 }else{
                     s.mode = SLOW;
                 }
+
+                if(data_ack->data[0] > s.base - 1){
+                    s.base = data_ack->data[0] + 1;
+                    s.track = s.base;
+                }
+
                 continue;
             }
             else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
@@ -364,13 +359,21 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
                     }
 
                     if(errno == EINTR){
+                        fprintf(stderr,"slow mode acked timeout \n");
                         attempts++;
                         continue;
                     }
                     else if(data_ack->data[0] != data_packet->seqnum){
                         fprintf(stderr,"acked packet is not expected one \n");
-                        attempts++;
-                        continue;
+                        if(data_ack->data[0] > s.base - 1){
+                            s.base = data_ack->data[0] + 1;
+                            s.track = s.base;
+                            s.mode = FAST;
+                            break;
+                        }else{
+                            attempts++;
+                            continue;
+                        }
                     }
                     else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
                         s.base = s.track +1;
@@ -515,13 +518,11 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
 
             //write to file
             char *tmp;
-            tmp = malloc(DATALEN* sizeof(char));
+            tmp = malloc(N*DATALEN* sizeof(char));
             for(i=0; i < sizeof(data_pkt->data); i++){
                 tmp[i] = data_pkt->data[i] + '0';
             }
-            strcat(tmp,"\0\n");
-            strcpy((char *) buf, tmp);
-
+            strcat((char *) buf, tmp);
         }
         else{
 
