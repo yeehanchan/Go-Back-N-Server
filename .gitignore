@@ -3,6 +3,5 @@
 CMakeLists.txt
 cmake-build-debug*
 *.o
-*.txt
 sender
 receiver

@@ -54,7 +54,6 @@ int main(int argc, char *argv[])
 		perror("gbn_accept");
 		exit(-1);
 	}
-	
 	/*----- Reading from the socket and dumping it to the file -----*/
 	while(1){
 		if ((numRead = gbn_recv(newSockfd, buf, DATALEN, 0)) == -1){
@@ -62,9 +61,10 @@ int main(int argc, char *argv[])
 			exit(-1);
 		}
 		else if (numRead == 0)
-			break;
-		fwrite(buf, 1, numRead, outputFile);
-	}
+            break;
+        fwrite(buf, 1, numRead, outputFile);
+
+    }
 
 	/*----- Closing the socket -----*/
 	if (gbn_close(sockfd) == -1){

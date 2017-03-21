@@ -59,15 +59,13 @@ int make_data_pkt(gbnhdr * pkt,uint8_t type,int seq, char *data){
     pkt->type = type;
     pkt->seqnum = seq;
     int i;
-    if(type == DATAACK){
-        pkt->data[0] = atoi(data);
-    }
-    else{
+    if(type == DATA){
         for(i = 0; i < strlen(data); i++) {
             pkt->data[i] = data[i] - '0';
         }
+        pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt));
     }
-    pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt));
+
     return 1;
 }
 
@@ -192,7 +190,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
     socklen_t socklen = s.server_socklen;
     int i,attempts = 0;
     ssize_t revlen,sendlen;
-
+    gbnhdr *data_packet, *data_ack;
 
     if(s.track < N){
         while((token = strsep(&buf,"\n")) != NULL){
@@ -232,101 +230,111 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
 
             // if last packet is acked, send new packet s.track
-            while(attempts < 5 && s.track == s.base){
-
-                fprintf(stderr, "attempts %d \n", attempts);
-
-                // send packet nextseq
-                gbnhdr *data_packet = malloc(sizeof(struct gbnhdr*));
-                gbnhdr *data_ack = malloc(sizeof(struct gbnhdr*));
+            data_packet = malloc(sizeof(gbnhdr*));
+            data_ack = malloc(sizeof(gbnhdr*));
+            if(s.track == s.base){
 
 
-                make_data_pkt(data_packet,DATA,s.track,s.data[s.track]);
-                if(sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
-                    fprintf(stderr,"data packet sent error \n");
-                    attempts++;
+                while(attempts < 5){
+
+
+                    make_data_pkt(data_packet,DATA,s.track,s.data[s.track]);
+                    if(sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
+                        fprintf(stderr,"data packet sent error \n");
+                        attempts++;
+                        continue;
+                    }
+
+                    fprintf(stderr,"1 attempts %d: client sent new pkt seq %d \n",attempts,data_packet->seqnum);
+                    alarm(TIMEOUT);
+
+
+
+                    if(recvfrom(sockfd, data_ack, BUFF_SIZE, 0, server, &socklen) == -1){
+                        fprintf(stderr,"acked packet received error \n");
+                        attempts++;
+                        continue;
+                    }
+
+                    if(errno == EINTR){
+                        attempts++;
+                        continue;
+                    }
+                    else if(data_ack->data[0] != data_packet->seqnum){
+                        fprintf(stderr,"acked packet is not sent packet \n");
+                        attempts++;
+                        continue;
+                    }
+                    else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
+                        s.base = s.track +1;
+                        s.track++;
+                        fprintf(stderr,"client received ack %d \n",data_ack->data[0]);
+                        break;
+                    }
+
                 }
 
-                fprintf(stderr,"client sent unacked pkt seq %d \n",data_packet->seqnum);
-                alarm(TIMEOUT);
-
-
-
-                if(recvfrom(sockfd, data_ack, BUFF_SIZE, 0, server, &socklen) == -1){
-                    fprintf(stderr,"acked packet received error \n");
-                    attempts++;
+                if(attempts == 5){
+                    fprintf(stderr,"5 Attempts! Quit!\m");
+                    /*TODO: SEND FIN*/
+                    return(-1);
                 }
 
-                if(errno == EINTR){
-                    attempts++;
-                }
-                else if(data_ack->data[0] != data_packet->seqnum){
-                    fprintf(stderr,"acked packet is not sent packet \n");
-                    attempts++;
-                }
-                else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
-                    s.base = s.track +1;
-                    s.track++;
-                    fprintf(stderr,"client received ack %d \n",data_ack->data[0]);
-                    break;
-                }
+                attempts = 0;
 
             }
 
-            if(attempts == 5){
-                fprintf(stderr,"5 Attempts! Quit!");
-                /*TODO: SEND FIN*/
-                return(-1);
-            }
 
-            attempts = 0;
             // if last packet was not acked, send last packet
+            if(s.base < s.track){
 
 
-            gbnhdr *data_packet = malloc(sizeof(struct gbnhdr*));
-            gbnhdr *data_ack = malloc(sizeof(struct gbnhdr*));
+                while(attempts < 5){
 
-            while(attempts < 5 && s.base < s.track){
 
-                fprintf(stderr, "attempts %d \n", attempts);
-                make_data_pkt(data_packet,DATA,s.base,s.data[s.base]);
-                if(sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
-                    fprintf(stderr,"data packet sent error \n");
-                    attempts++;
+                    make_data_pkt(data_packet,DATA,s.base,s.data[s.base]);
+                    if(sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
+                        fprintf(stderr,"data packet sent error \n");
+                        attempts++;
+                    }
+
+                    fprintf(stderr,"2 attempts %d: client sent unacked pkt seq %d \n",attempts,data_packet->seqnum);
+                    alarm(TIMEOUT);
+
+
+                    if((revlen = recvfrom(sockfd, data_ack, BUFF_SIZE, 0, server, &socklen) == -1)){
+                        fprintf(stderr,"acked packet received error \n");
+                        attempts++;
+                        continue;
+                    }
+
+                    if(errno == EINTR){
+                        attempts++;
+                        continue;
+                    }
+                    else if(data_ack->data[0] != data_packet->seqnum){
+                        fprintf(stderr,"acked packet is not sent packet \n");
+                        attempts++;
+                        continue;
+                    }
+                    else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
+                        s.base++;
+                        fprintf(stderr,"client received ack %d \n",data_ack->data[0]);
+                        break;
+                    }
                 }
 
-                fprintf(stderr,"client sent unacked pkt %d \n",data_packet->seqnum);
-                alarm(TIMEOUT);
-
-
-
-                if((revlen = recvfrom(sockfd, data_ack, BUFF_SIZE, 0, server, &socklen) == -1)){
-                    fprintf(stderr,"acked packet received error \n");
-                    attempts++;
+                if(attempts == 5){
+                    fprintf(stderr,"5 Attempts! Quit!\n");
+                    /*TODO: SEND FIN*/
+                    return(-1);
                 }
 
-                if(errno == EINTR){
-                    attempts++;
-                }
-                else if(data_ack->data[0] != data_packet->seqnum){
-                    fprintf(stderr,"acked packet is not sent packet \n");
-                    attempts++;
-                }
-                else if(data_ack->type == DATAACK && checkPkt(data_ack) == 0){
-                    s.base++;
-                    fprintf(stderr,"client received ack %d \n",data_ack->data[0]);
-                    break;
-                }
+                attempts = 0;
+
             }
-
-            if(attempts == 5){
-                fprintf(stderr,"5 Attempts! Quit!");
-                /*TODO: SEND FIN*/
-                return(-1);
-            }
-
-            attempts = 0;
-
+            free(data_ack);
+            free(data_packet);
 
         } //fast mode
         else{
@@ -371,6 +379,17 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
 
         if(data_pkt->seqnum == s.last_acked + 1){
 
+            //ack to client
+            data_ack->type = DATAACK;
+            data_ack->seqnum = data_pkt->seqnum+1;
+            data_ack->data[0] = data_pkt->seqnum;
+            data_ack->checksum = checksum(data_ack, sizeof(data_ack));
+            maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
+            s.last_acked = data_pkt->seqnum;
+            fprintf(stderr,"1 server acked %d, expected %d\n",data_ack->data[0],data_ack->seqnum);
+
+
+
             //write to file
             char *tmp;
             tmp = malloc(DATALEN* sizeof(char));
@@ -380,27 +399,14 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
             strcat(tmp,"\0\n");
             strcpy((char *) buf, tmp);
 
-            //ack to client
-            char *ack;
-            sprintf(ack,"%d",data_pkt->seqnum);
-            make_data_pkt(data_ack,DATAACK,data_pkt->seqnum+1,ack);
-            maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
-            s.last_acked++;
-            fprintf(stderr,"1 server acked %d, expected %d\n",data_ack->data[0],data_ack->seqnum);
-
         }
         else{
-            char *ack;
-            if(s.last_acked < 0){
-                ack = "255";
-            }
-            else{
-                sprintf(ack,"%d",s.last_acked);
-            }
-            make_data_pkt(data_ack,DATAACK,s.last_acked+1,ack);
+            data_ack->type = DATAACK;
+            data_ack->seqnum = s.last_acked+1;
+            data_ack->data[0] = s.last_acked;
+            data_ack->checksum = checksum(data_ack, sizeof(data_ack));
             maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
             fprintf(stderr,"2 server acked %d, expected %d\n",data_ack->data[0],data_ack->seqnum);
-
         }
 
 
@@ -411,10 +417,11 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
         make_pkt(FINACK,data_ack);
         maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
         fprintf(stderr,"Finish Acked \n");
-        free(data_pkt);
-        free(data_ack);
         return 0;
     }
+
+    free(data_ack);
+    free(data_pkt);
 
     return 0;
 }
