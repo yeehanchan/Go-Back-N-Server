@@ -1,4 +1,6 @@
+﻿#define _XOPEN_SOURCE
 #include "gbn.h"
+
 
 
 uint16_t checksum(uint16_t *buf, int nwords)
@@ -15,6 +17,7 @@ uint16_t checksum(uint16_t *buf, int nwords)
 
 
 
+
 void gbn_init(){
     s.state_type = CLOSED;
     s.server_socklen = sizeof(struct sockaddr);
@@ -27,11 +30,34 @@ void gbn_init(){
 }
 
 
+/*Define a new method to calculate checksum for a packet without packet filed checksum */
+/*Thanks Kesden's help! */
+uint16_t packet_checksum(gbnhdr *packet) {
+	
+	uint16_t header = ((uint16_t)packet->type << 8) + (uint16_t)packet->seqnum;
 
+    int nwords = (sizeof(packet->type) + sizeof(packet->seqnum) + sizeof(packet->data)) / sizeof(uint16_t);
+    uint16_t buf[nwords];
+    buf[0] = header;
 
+    int i;
+    for (i = 1; i <= sizeof(packet->data); i++) {
+        int index = (i+1)/2;
+        if (i % 2 == 0) {
+        	/*append data*/
+        	index -=1;
+            buf[index] += packet->data[i-1];
+        } else {
+        	/*new data*/
+            buf[index] = packet->data[i-1];
+        }
+    }
+    return checksum(buf, nwords);
+}
 
-//check interity
 int checkPkt(gbnhdr * pkt){
+
+	/* 
 
     uint16_t cs;
     char data[DATALEN],buf[BUFF_SIZE];
@@ -48,6 +74,14 @@ int checkPkt(gbnhdr * pkt){
         return 0;
     }
     return 1;
+    */
+
+    if (pkt->checksum == packet_checksum(pkt)){
+    	return 0;
+    }
+    else{
+    	return 1;
+    }
 }
 
 
@@ -57,10 +91,11 @@ int make_data_pkt(gbnhdr * pkt,uint8_t type,int seq, char *data){
     pkt->seqnum = seq;
     int i;
     if(type == DATA){
-        for(i = 0; i < sizeof(data); i++) {
+        for(i = 0; i < strlen(data); i++) {
             pkt->data[i] = data[i] - '0';
         }
-        pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt));
+        /* pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt)); */
+        pkt->checksum = packet_checksum(pkt);
     }
 
     return 1;
@@ -69,36 +104,40 @@ int make_data_pkt(gbnhdr * pkt,uint8_t type,int seq, char *data){
 
 
 
-// make packet based on type
 int make_pkt(uint8_t type, gbnhdr * pkt){
 
     switch(type) {
         case SYN :
             pkt->type = SYN;
-            pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt));
+            /* pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt)); */
+            pkt->checksum = packet_checksum(pkt);
             return EXIT_SUCCESS;
 
         case SYNACK :
             pkt->type = SYNACK;
-            pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt));
+            /* pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt)); */
+            pkt->checksum = packet_checksum(pkt);
             return EXIT_SUCCESS;
 
 
         case FIN :
 
             pkt->type = FIN;
-            pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt));
+            /* pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt)); */
+            pkt->checksum = packet_checksum(pkt);
             return EXIT_SUCCESS;
 
         case FINACK :
 
             pkt->type = FINACK;
-            pkt->checksum = checksum((uint16_t*)pkt,sizeof(pkt));
+            /* pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt)); */
+            pkt->checksum = packet_checksum(pkt);
             return EXIT_SUCCESS;
         case RST :
 
             pkt->type = RST;
-            pkt->checksum = checksum((uint16_t*)pkt,sizeof(pkt));
+            /* pkt->checksum = checksum((uint16_t*)pkt, sizeof(pkt)); */
+            pkt->checksum = packet_checksum(pkt);
             return EXIT_SUCCESS;
     }
 
@@ -109,10 +148,8 @@ int make_pkt(uint8_t type, gbnhdr * pkt){
 
 void handle_timeout()
 {
-    //alert when timed out
     if(conn_retry_counts < CONNECTION_RETRY_LIMIT){
 
-        // send a syn pkt to server
         gbnhdr *syn_packet;
         syn_packet = malloc(sizeof(struct gbnhdr*));
         make_pkt(SYN, syn_packet);
@@ -121,8 +158,9 @@ void handle_timeout()
             exit(-1);
         }
         conn_retry_counts ++;
-        fprintf(stderr,"retry %d: client sent syn\n",conn_retry_counts);
+        fprintf(stderr,"retry times %d: client sent syn\n",conn_retry_counts);
         free(syn_packet);
+        fprintf(stderr, "syn_packet has been freed\n");
         alarm(TIMEOUT);
 
     }else{
@@ -142,7 +180,6 @@ void gbn_send_timeout() {
 
 
 
-// logic was discussed with Evan Kesten
 ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	
 
@@ -153,7 +190,6 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 	 */
 
     if(s.state_type != ESTABLISHED){
-        // should have been established
         return(-1);
     }
 
@@ -164,18 +200,19 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
     };
     sigaction(SIGALRM, &sact, NULL);
 
-    char *token;
+    char *token = buf, *end = buf;
     struct sockaddr *server = s.server;
     socklen_t socklen = s.server_socklen;
     int i,attempts = 0;
     ssize_t revlen,sendlen;
+    int chunksize = 10;
 
     if(s.track < N){
-        while((token = strsep(&buf,"\n")) != NULL){
+        while(strlen(end) != NULL){
 
-            char *p = token;
-            int len = strlen(token);
-            // split oversized packet
+            char *p = end;
+            int len = strlen(p);
+
             if(len > DATALEN){
 
                 while(len > 0){
@@ -183,53 +220,61 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
                     p = p + DATALEN;
                     len -= DATALEN;
                     s.track++;
-
                 }
 
             }
             else{
-                strcpy(s.data[s.track],token);
+                strcpy(s.data[s.track],p);
                 s.track++;
             }
+            strsep(&end,"\n");
+            if(end == NULL || strlen(end) == 0){
+                break;
+            }
         }
+
 
     }else{
         fprintf(stderr,"buffer too long\n");
     }
 
+    fprintf(stderr,"finish input \n");
 
     /*Sliding Window*/
     s.track = 0;
+
     gbnhdr *data_packet, *data_ack, *data_packet_1, *data_ack_1,*fin_packet;
     data_packet = malloc(sizeof(struct gbnhdr*)*N);
     data_packet_1 = malloc(sizeof(struct gbnhdr*)*N);
     data_ack = malloc(sizeof(struct gbnhdr*)*N);
     data_ack_1 = malloc(sizeof(struct gbnhdr*)*N);
     fin_packet =  malloc(sizeof(struct gbnhdr*)*N);
+
     make_pkt(FIN,fin_packet);
 
 
 
-    while(s.track < 20){
+    while(s.track < N){
 
-        fprintf(stderr,"track number: %d ",s.track);
-
-        // In Fast mode
         if(s.mode == FAST){
+
+            if(strlen(s.data[s.track]) == 0 || strlen(s.data[s.base]) == 0){
+                break;
+            }
 
             fprintf(stderr,"Mode: Fast Mode \n");
 
-            // if no previous unacked pkt, send track and track + 1
             if(s.track == s.base) {
 
                 make_data_pkt(data_packet,DATA,s.track,s.data[s.track]);
                 make_data_pkt(data_packet_1,DATA,s.track+1,s.data[s.track+1]);
 
-            }// if previous unacked data, send base and base + 1
+            }
             else if(s.track > s.base && s.track < s.base + 2){
 
                 make_data_pkt(data_packet,DATA,s.base,s.data[s.base]);
                 make_data_pkt(data_packet_1,DATA,s.track,s.data[s.track]);
+
             }
 
             /*send packet 1*/
@@ -239,7 +284,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
                 continue;
             }
 
-            fprintf(stderr,"client sent first pkt seq %d \n",data_packet->seqnum);
+            fprintf(stderr,"client sent first pkt seq %d\n",data_packet->seqnum);
 
             /*send packet 2*/
             if(maybe_sendto(sockfd,data_packet_1, BUFF_SIZE, 0, server, socklen) == -1){
@@ -248,9 +293,8 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
                 continue;
             }
 
-            fprintf(stderr,"client sent second pkt seq %d \n",data_packet_1->seqnum);
+            fprintf(stderr,"client sent second pkt seq %d\n",data_packet_1->seqnum);
 
-            //TIMEOUT
             alarm(TIMEOUT);
 
 
@@ -277,15 +321,12 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
             }
 
             alarm(TIMEOUT);
-            //receive ack for packet 2
             /* if packet lost, break loop*/
             if(recvfrom(sockfd, data_ack_1, BUFF_SIZE, 0, server, &socklen) == -1){
                 fprintf(stderr,"second ack lost \n");
-                // if first ack is received
                 if(s.base == s.track + 1){
                     s.track++;
                 }else{
-                    // both ack are lost
                     s.mode = SLOW;
                 }
                 continue;
@@ -325,11 +366,13 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
         }
 
 
-        // In slow mode, packet not sent until last packet was acked
         if(s.mode == SLOW){
 
+
+            if(strlen(s.data[s.track]) == 0 || strlen(s.data[s.base]) == 0){
+                break;
+            }
             fprintf(stderr,"Mode: Slow Mode \n");
-            // if last packet is acked, send new packet s.track
 
             if(s.track == s.base){
 
@@ -339,8 +382,9 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
                 while(attempts < 5){
 
 
-
                     make_data_pkt(data_packet,DATA,s.track,s.data[s.track]);
+
+
                     if(maybe_sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
                         fprintf(stderr,"data packet sent error \n");
                         attempts++;
@@ -400,7 +444,6 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
             }
 
 
-            // if last packet was not acked, send last packet
             if(s.base < s.track){
 
 
@@ -410,6 +453,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
 
                     make_data_pkt(data_packet,DATA,s.base,s.data[s.base]);
+
                     if(maybe_sendto(sockfd,data_packet, BUFF_SIZE, 0, server, socklen) == -1){
                         fprintf(stderr,"data packet sent error \n");
                         attempts++;
@@ -460,7 +504,6 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
     }
 
-    //finish connection
     if(sendto(sockfd,fin_packet, BUFF_SIZE, 0, server, socklen) == -1){
         fprintf(stderr,"FIN LOST\n");
     }
@@ -481,7 +524,6 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags){
 
 
 
-// need to be modified later
 ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
 
 
@@ -491,7 +533,7 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
     data_pkt = malloc(sizeof(struct gbnhdr*)*N);
     data_ack = malloc(sizeof(struct gbnhdr*)*N);
     ssize_t revlen;
-    int i;
+    int i,j;
 
 
     if((revlen = recvfrom(sockfd, data_pkt, BUFF_SIZE, 0, client, &socklen) == -1)){
@@ -506,53 +548,61 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags){
 
         if(data_pkt->seqnum == s.last_acked+1){
 
-            //ack to client
             data_ack->type = DATAACK;
             data_ack->seqnum = data_pkt->seqnum+1;
             data_ack->data[0] = data_pkt->seqnum;
-            data_ack->checksum = checksum((uint16_t*)data_ack, sizeof(data_ack));
+            /*data_ack->checksum = checksum((uint16_t*)data_ack, sizeof(data_ack)); */
+            data_ack->checksum = packet_checksum(data_ack);
             fprintf(stderr,"1 server acked %d, expected %d\n",data_ack->data[0],data_ack->seqnum);
             s.last_acked = data_ack->data[0];
             maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
 
 
-            //write to file
-            char *tmp;
-            tmp = malloc(N*DATALEN* sizeof(char));
+
+            
             for(i=0; i < sizeof(data_pkt->data); i++){
-                tmp[i] = data_pkt->data[i] + '0';
+                if(data_pkt->data[i] == NULL){
+                    break;
+                }
             }
-            strcat((char *) buf, tmp);
+            char *tmp = malloc(sizeof(char)*i);
+            if(i > 0){
+                for(j = 0; j < i; j++){
+                    tmp[j] = data_pkt->data[j] + '0';  
+                }
+                strcpy((char *) buf, "");
+                strcpy((char *) buf, tmp);
+                fprintf(stderr,"server output content %d %s\n",i-1,buf);
+            }
+
         }
         else{
 
             data_ack->type = DATAACK;
             data_ack->seqnum = s.last_acked+1;
             data_ack->data[0] = s.last_acked;
-            data_ack->checksum = checksum((uint16_t*)data_ack, sizeof(data_ack));
+            /* data_ack->checksum = checksum((uint16_t*)data_ack, sizeof(data_ack)); */
+            data_ack->checksum = packet_checksum(data_ack);
             fprintf(stderr,"2 server acked %d, expected %d\n",data_ack->data[0],data_ack->seqnum);
             maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
         }
-
-
-
-        return DATALEN;
+        return i;
     }
     else if(data_pkt->type == FIN && checkPkt(data_pkt) == 0){
         make_pkt(FINACK,data_ack);
         fprintf(stderr,"Finish Acked \n");
         maybe_sendto(sockfd, data_ack, BUFF_SIZE, 0, s.client, s.client_socklen);
         gbn_close(sockfd);
+        
+        free(data_ack);
+        free(data_pkt);
+        return 0;
     }
-
-    free(data_ack);
-    free(data_pkt);
-    return DATALEN;
+    
 }
 
 
 
-// need to be modified later
 int gbn_close(int sockfd){
 
     close(sockfd);
@@ -561,7 +611,6 @@ int gbn_close(int sockfd){
 
 
 
-// need to be modified later
 int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 
@@ -572,9 +621,8 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
     s.server = server;
     s.client_sockfd = sockfd;
 
-    syn_packet = malloc(sizeof(struct gbnhdr *));
-    syn_ack_pkt = malloc(sizeof(struct gbnhdr *));
-    // make a syn pkt
+    syn_packet = malloc(sizeof(struct gbnhdr *)*N);
+    syn_ack_pkt = malloc(sizeof(struct gbnhdr *)*N);
     make_pkt(SYN, syn_packet);
     if((senlen = maybe_sendto(sockfd, syn_packet, BUFF_SIZE, 0, server, socklen) == -1)){
         close(sockfd);
@@ -582,6 +630,7 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
     }
 
     fprintf(stderr,"client sent struct  %d %d\n",syn_packet->type,syn_packet->checksum);
+    
     s.state_type = SYN_SENT;
 
     signal(SIGALRM,&handle_timeout);
@@ -620,7 +669,6 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 }
 
-// need to be modified later
 int gbn_listen(int sockfd, int backlog){
 
 
@@ -673,7 +721,6 @@ int gbn_socket(int domain, int type, int protocol){
 
 
 
-//need to be modified later
 int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
 
     gbn_init();
@@ -683,8 +730,8 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
     gbnhdr *syn_pkt, *rep_pkt;
     s.client = client;
     s.server_sockfd = sockfd;
-    syn_pkt = malloc(sizeof(struct gbnhdr *));
-    rep_pkt = malloc(sizeof(struct gbnhdr *));
+    syn_pkt = malloc(sizeof(struct gbnhdr *)*N);
+    rep_pkt = malloc(sizeof(struct gbnhdr *)*N);
 
 
 

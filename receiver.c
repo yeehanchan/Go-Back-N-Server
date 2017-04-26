@@ -61,10 +61,11 @@ int main(int argc, char *argv[])
 			exit(-1);
 		}
 		else if (numRead == 0)
-            break;
-        fwrite(buf, 1, numRead, outputFile);
+			break;
+		fwrite(buf, 1, numRead, outputFile);
+		fprintf(stderr, "write %s to file\n", buf);
+	}
 
-    }
 
 	/*----- Closing the socket -----*/
 	if (gbn_close(sockfd) == -1){
