@@ -47,8 +47,16 @@ typedef struct {
 	uint8_t  seqnum;          /* sequence number of the packet              */
     uint16_t checksum;        /* header and payload checksum                */
     uint8_t data[DATALEN];    /* pointer to the payload                     */
+<<<<<<< HEAD
     /*(uint16_t last_len;*/
     /*uint8_t islast;*/  
+=======
+<<<<<<< HEAD
+    /*(uint16_t last_len;*/
+    /*uint8_t islast;*/  
+=======
+>>>>>>> 8d07222ad3ff86adbf162fb90eab6ae697a3cfab
+>>>>>>> 7f06d046379c97f77586de28bf6bc4d15ef6b00b
 } __attribute__((packed)) gbnhdr;
 
 
@@ -80,12 +88,27 @@ typedef struct state_t{
     enum STATE state_type;
     int base; 
     int last_acked; 
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 7f06d046379c97f77586de28bf6bc4d15ef6b00b
     int track;
     int num; 
     enum MODE mode; 
     /*char *data[N][DATALEN];*/
     uint8_t data[N][DATALEN];
     int len;
+<<<<<<< HEAD
+=======
+=======
+    int track; 
+    enum MODE mode; 
+    char *data[N][DATALEN];
+
+    uint8_t curr_seqnum; 
+    int WINDOWSIZE;
+>>>>>>> 8d07222ad3ff86adbf162fb90eab6ae697a3cfab
+>>>>>>> 7f06d046379c97f77586de28bf6bc4d15ef6b00b
 
 } state_t;
 

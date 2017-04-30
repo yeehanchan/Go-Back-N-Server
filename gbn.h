@@ -25,8 +25,18 @@ extern int h_errno;
 extern int errno;
 
 /*----- Protocol parameters -----*/
+<<<<<<< HEAD
 #define LOSS_PROB 0.1
 #define CORR_PROB 0.01
+=======
+<<<<<<< HEAD
+#define LOSS_PROB 0.1
+#define CORR_PROB 0.01
+=======
+#define LOSS_PROB 1e-2    /* loss probability                            */
+#define CORR_PROB 1e-3    /* corruption probability                      */
+>>>>>>> 8d07222ad3ff86adbf162fb90eab6ae697a3cfab
+>>>>>>> 7f06d046379c97f77586de28bf6bc4d15ef6b00b
 #define DATALEN   1024    /* length of the payload                       */
 #define N         1024    /* Max number of packets a single call to gbn_send can process */
 #define TIMEOUT      1    /* timeout to resend packets (1 second)        */
@@ -80,12 +90,27 @@ typedef struct state_t{
     enum STATE state_type;
     int base; 
     int last_acked; 
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> 7f06d046379c97f77586de28bf6bc4d15ef6b00b
     int track;
     int num; 
     enum MODE mode; 
     /*char *data[N][DATALEN];*/
     uint8_t data[N][DATALEN];
     int len;
+<<<<<<< HEAD
+=======
+=======
+    int track; 
+    enum MODE mode; 
+    char *data[N][DATALEN];
+
+    uint8_t curr_seqnum; 
+    int WINDOWSIZE;
+>>>>>>> 8d07222ad3ff86adbf162fb90eab6ae697a3cfab
+>>>>>>> 7f06d046379c97f77586de28bf6bc4d15ef6b00b
 
 } state_t;
 
